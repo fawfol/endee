@@ -739,6 +739,10 @@ int main(int argc, char** argv) {
                                                                     include_vectors,
                                                                     ef);
 
+                    if(!search_response) {
+                        return json_error(404, "search failed");
+                    }
+
                     // Serialize the ResultSet using MessagePack
                     msgpack::sbuffer sbuf;
                     msgpack::pack(sbuf, search_response.value());
@@ -1113,19 +1117,8 @@ int main(int argc, char** argv) {
         return response;
     });
 
-    unsigned int num_cores = std::thread::hardware_concurrency() * 3;
-    LOG_INFO("Number of processor cores: " << num_cores);
-    if(settings::NUM_SERVER_THREADS == 0) {
-        // Run on max possible threads
-        LOG_INFO("Using all available threads");
-        // app.port(settings::SERVER_PORT).multithreaded().run();
-        app.port(settings::SERVER_PORT).timeout(5).concurrency(num_cores).run();
-    }
-    // else {
-    //     // Limit on the number of threads
-    //     LOG_INFO("Using " << settings::NUM_SERVER_THREADS << " threads");
-    //     app.port(settings::SERVER_PORT).concurrency(settings::NUM_SERVER_THREADS).run();
-    // }
+    LOG_INFO("Using " << settings::NUM_SERVER_THREADS << " threads");
+    app.port(settings::SERVER_PORT).concurrency(settings::NUM_SERVER_THREADS).run();
 
     return 0;
 }

@@ -38,7 +38,7 @@ namespace settings {
     constexpr size_t RECOVERY_BATCH_SIZE = 20'000;
     constexpr size_t SAVE_EVERY_N_MINUTES = 30;
     // Number of threads for http server - 0 means it will default to hardware concurrency
-    constexpr size_t NUM_SERVER_THREADS = 0;
+    constexpr size_t DEFAULT_NUM_SERVER_THREADS = 0;
     // Number of save mutexes for parallel saves
     constexpr size_t NUM_INDEX_SAVE_MUTEXES = 16;
 
@@ -112,6 +112,22 @@ namespace settings {
         const char* env = std::getenv("NDD_SERVER_ID");
         return env ? std::string(env) : DEFAULT_SERVER_ID;
     }();
+
+    inline static size_t NUM_SERVER_THREADS = [] {
+        const char* env = std::getenv("NDD_NUM_SERVER_THREADS");
+        if (env) {
+            return (size_t)std::stoull(env);
+        }
+
+        // If no env var, check if default is 0 (auto-detect)
+        if (DEFAULT_NUM_SERVER_THREADS == 0) {
+            unsigned int hw = std::thread::hardware_concurrency() * 2;
+            return hw > 0 ? (size_t)hw : 1; // Fallback to 1 if hardware_concurrency returns 0
+        }
+
+        return (size_t)DEFAULT_NUM_SERVER_THREADS;
+    }();
+
     inline static size_t SERVER_PORT = [] {
         const char* env = std::getenv("NDD_SERVER_PORT");
         return env ? std::stoull(env) : DEFAULT_SERVER_PORT;
