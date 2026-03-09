@@ -13,6 +13,8 @@
 
 namespace ndd {
 
+    // Thin storage facade that keeps the raw sparse vectors and the derived
+    // inverted index in the same MDBX environment and updates them transactionally.
     class SparseVectorStorage {
     public:
         explicit SparseVectorStorage(const std::string& db_path) :
@@ -86,12 +88,12 @@ namespace ndd {
                     return false;
                 }
 
-                // 1. Store in docs DB
+                // Always write the source-of-truth document payload first, then update the
+                // derived inverted index in the same transaction.
                 if(!storage_->storeVectorInternal(txn_, doc_id, vec)) {
                     return false;
                 }
 
-                // 2. Update Index
                 if(!storage_->sparse_index_->addDocumentsBatch(txn_, {{doc_id, vec}})) {
                     return false;
                 }
@@ -113,18 +115,17 @@ namespace ndd {
                     return false;
                 }
 
-                // 1. Get vector to remove from index
+                // Deletion runs in the opposite order: look up the stored vector, remove its
+                // terms from the inverted index, then delete the raw payload row.
                 auto vec = get_vector(doc_id);
                 if(!vec) {
                     return false;  // Not found
                 }
 
-                // 2. Remove from Index
                 if(!storage_->sparse_index_->removeDocument(txn_, doc_id, *vec)) {
                     return false;
                 }
 
-                // 3. Remove from docs DB
                 if(!storage_->deleteVectorInternal(txn_, doc_id)) {
                     return false;
                 }
@@ -148,24 +149,6 @@ namespace ndd {
         }
 
         // Vector management
-        bool store_vector(ndd::idInt doc_id, const SparseVector& vec) {
-            std::unique_lock<std::shared_mutex> lock(mutex_);
-            auto txn = begin_transaction(false);
-            if(!txn->store_vector(doc_id, vec)) {
-                txn->abort();
-                return false;
-            }
-            return txn->commit();
-        }
-
-        std::optional<SparseVector> get_vector(ndd::idInt doc_id) const {
-            std::shared_lock<std::shared_mutex> lock(mutex_);
-            // Const cast to create read-only transaction
-            auto* non_const_this = const_cast<SparseVectorStorage*>(this);
-            auto txn = non_const_this->begin_transaction(true);
-            return txn->get_vector(doc_id);
-        }
-
         bool delete_vector(ndd::idInt doc_id) {
             std::unique_lock<std::shared_mutex> lock(mutex_);
             auto txn = begin_transaction(false);
@@ -173,40 +156,6 @@ namespace ndd {
                 txn->abort();
                 return false;
             }
-            return txn->commit();
-        }
-
-        bool update_vector(ndd::idInt doc_id, const SparseVector& vec) {
-            std::unique_lock<std::shared_mutex> lock(mutex_);
-            auto txn = begin_transaction(false);
-
-            // Get old vector to remove from index
-            auto old_vec = txn->get_vector(doc_id);
-            if(old_vec) {
-                if(!sparse_index_->removeDocument(txn->getTxn(), doc_id, *old_vec)) {
-                    txn->abort();
-                    return false;
-                }
-            }
-
-            // Store new vector (overwrites in docs_dbi)
-            if(!storeVectorInternal(txn->getTxn(), doc_id, vec)) {
-                txn->abort();
-                return false;
-            }
-
-            // Add to index
-            if(!sparse_index_->addDocumentsBatch(txn->getTxn(), {{doc_id, vec}})) {
-                txn->abort();
-                return false;
-            }
-
-            // Save metadata (Handled internally)
-            // if (!sparse_index_->saveMetadata(txn->getTxn())) {
-            //    txn->abort();
-            //    return false;
-            // }
-
             return txn->commit();
         }
 
@@ -414,3 +363,4 @@ namespace ndd {
     };
 
 }  // namespace ndd
+

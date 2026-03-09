@@ -17,7 +17,7 @@
 #    include <immintrin.h>
 #elif defined(__aarch64__) || defined(_M_ARM64)
 #    include <arm_neon.h>
-#endif
+#endif // defined(__x86_64__) || defined(_M_X64)
 
 #include "mdbx/mdbx.h"
 #include "../core/types.hpp"
@@ -30,13 +30,16 @@ namespace ndd {
     static constexpr ndd::idInt EXHAUSTED_DOC_ID = std::numeric_limits<ndd::idInt>::max();
 
 #pragma pack(push, 1)
+    // Per-term metadata stored under the reserved metadata key for that term.
     struct PostingListHeader {
         uint32_t nr_entries = 0;
         uint32_t nr_live_entries = 0;
         float max_value = 0.0f;
     };
 
+    // Header that prefixes each on-disk (term_id, block_nr) payload.
     struct BlockHeader {
+        //TODO: on-disk version need not be in each block header
         uint8_t version = 1;
         uint16_t nr_entries = 0;
         uint16_t nr_live_entries = 0;
@@ -44,6 +47,7 @@ namespace ndd {
     };
 #pragma pack(pop)
 
+    // Fully decoded posting entry used only in update/delete paths.
     struct PostingListEntry {
         ndd::idInt doc_id;
         float value;
@@ -59,10 +63,14 @@ namespace ndd {
         ScoredDoc(ndd::idInt id, float s) : doc_id(id), score(s) {}
 
         bool operator<(const ScoredDoc& other) const {
+            // Reverse ordering so std::priority_queue behaves like a min-heap on score.
             return score > other.score;
         }
     };
 
+    // MDBX-backed sparse inverted index. Search walks zero-copy block views directly,
+    // while update/delete paths decode a block into PostingListEntry objects, merge,
+    // and write the block back.
     class InvertedIndex {
     public:
         InvertedIndex(MDBX_env* env, size_t vocab_size);
@@ -89,6 +97,8 @@ namespace ndd {
         MDBX_dbi blocked_term_postings_dbi_;
         size_t vocab_size_;
 
+        // Cached per-term max values loaded from posting-list metadata. Search uses this
+        // to skip absent terms quickly and to compute pruning bounds.
         std::unordered_map<uint32_t, float> term_info_;
 
         mutable std::shared_mutex mutex_;
@@ -133,6 +143,8 @@ namespace ndd {
             return static_cast<ndd::idInt>(base + static_cast<uint64_t>(block_offset));
         }
 
+        // Zero-copy view into a block payload owned by MDBX. Pointers remain valid only while
+        // the surrounding transaction/cursor stays alive and on the same record.
         struct BlockView {
             const BlockOffset* doc_offsets;
             const void* values;
@@ -141,15 +153,19 @@ namespace ndd {
             float max_value;
         };
 
+        // Cursor-backed iterator over one term. It only keeps the current block in memory and
+        // advances across MDBX records as search/pruning consumes entries.
         struct PostingListIterator {
             uint32_t term_id;
             float term_weight;
             float global_max;
             const InvertedIndex* index;
 
+            // Cursor positioned somewhere within this term's contiguous MDBX key range.
             MDBX_cursor* cursor;
             uint32_t current_block_nr;
 
+            // Zero-copy pointers for the current block.
             const BlockOffset* doc_offsets;
             const void* values_ptr;
             uint32_t data_size;
@@ -166,7 +182,7 @@ namespace ndd {
 #ifdef NDD_INV_IDX_PRUNE_DEBUG
             uint32_t initial_entries;
             uint32_t pruned_entries;
-#endif
+#endif // NDD_INV_IDX_PRUNE_DEBUG
 
             void init(MDBX_cursor* cursor,
                     uint32_t term_id,
@@ -211,6 +227,7 @@ namespace ndd {
             bool parseCurrentKV(const MDBX_val& key, const MDBX_val& data);
 
             inline void consumeEntries(uint32_t count) {
+                // Pruning relies on remaining_entries being conservative and monotonic.
                 if (count >= remaining_entries) {
                     remaining_entries = 0;
                 } else {

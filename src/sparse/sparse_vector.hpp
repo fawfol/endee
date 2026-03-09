@@ -7,6 +7,8 @@
 
 namespace ndd {
 
+    // Sparse vector payload stored in the document table. The convention in this module is that
+    // indices are sorted term ids and values[i] belongs to indices[i].
     struct SparseVector {
         std::vector<uint32_t> indices;  // term IDs (sorted)
         std::vector<float> values;      // corresponding values
@@ -22,7 +24,8 @@ namespace ndd {
 
             const uint8_t* ptr = data;
 
-            // Read number of non-zero elements (uint16_t)
+            // Packed format:
+            //   [nr_nonzero:u16][term_ids:n * u32][values:n * f16]
             uint16_t nr_nonzero;
             std::memcpy(&nr_nonzero, ptr, sizeof(uint16_t));
             ptr += sizeof(uint16_t);
@@ -72,7 +75,7 @@ namespace ndd {
             size_t total_size =
                     sizeof(uint16_t) + (nr_nonzero * sizeof(uint32_t)) + (nr_nonzero * sizeof(uint16_t));
 
-            // Single allocation
+            // Serialize contiguously so the vector can be written to MDBX as one value blob.
             std::vector<uint8_t> packed(total_size);
             uint8_t* ptr = packed.data();
 

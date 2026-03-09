@@ -26,6 +26,7 @@ namespace ndd {
             return std::fabs(a - b) <= settings::NEAR_ZERO;
         }
 
+        // Update header counters after a block-level merge/delete without letting them go negative.
         inline void applyHeaderDelta(PostingListHeader& header,
                                     int64_t total_delta,
                                     int64_t live_delta) {
@@ -105,7 +106,7 @@ namespace ndd {
         private:
             SteadyClock::time_point start_;
         };
-#endif
+#endif // ND_DEBUG
     }  // namespace
 
 #ifdef ND_DEBUG
@@ -257,7 +258,7 @@ namespace ndd {
 #else
     void printSparseSearchDebugStats() {}
     void printSparseUpdateDebugStats() {}
-#endif
+#endif // ND_DEBUG
 
     InvertedIndex::InvertedIndex(MDBX_env* env, size_t vocab_size)
         : env_(env), blocked_term_postings_dbi_(0), vocab_size_(vocab_size) {}
@@ -345,6 +346,8 @@ namespace ndd {
         {
             LOG_TIME("search phase 1");
 
+        // Build one iterator per live query term. Each iterator owns a cursor and lazily
+        // streams the term's block rows instead of materializing the whole posting list.
         for (size_t qi = 0; qi < query.indices.size(); qi++) {
             uint32_t term_id = query.indices[qi];
             if (term_id == kMetadataTermId) continue;
@@ -415,6 +418,8 @@ namespace ndd {
 
         ndd::idInt min_id = minIterDocId();
 
+        // Process the index in doc-id windows. The accumulator is dense within the current
+        // window even though the posting lists themselves stay sparse and block-based.
         while (min_id != EXHAUSTED_DOC_ID) {
             ndd::idInt batch_start = min_id;
             ndd::idInt batch_end = batch_start
@@ -433,12 +438,14 @@ namespace ndd {
 
             {
             LOG_TIME("search phase 3");
+            // Consume all postings that fall into this batch. The iterator keeps absolute doc_ids
+            // implicit as (current_block_nr, doc_offsets[idx]) to avoid rebuilding them eagerly.
             for (size_t i = 0; i < iters.size(); i++) {
                 PostingListIterator* it = iters[i];
 #ifdef ND_DEBUG
                 sparseSearchDebugStats().phase3_iterators_visited.fetch_add(1, std::memory_order_relaxed);
                 bool phase3_contributed = false;
-#endif
+#endif // ND_DEBUG
                 if (it->current_doc_id > batch_end) {
                     continue;
                 }
@@ -466,7 +473,7 @@ namespace ndd {
                             scores_buf[local] += vals[idx] * qw;
 #ifdef ND_DEBUG
                             phase3_contributed = true;
-#endif
+#endif // ND_DEBUG
                         }
                         idx++;
                     }
@@ -508,7 +515,7 @@ namespace ndd {
                             scores_buf[local] += ((float)vals[idx] * scale) * qw;
 #ifdef ND_DEBUG
                             phase3_contributed = true;
-#endif
+#endif // ND_DEBUG
                         }
                         idx++;
                     }
@@ -532,7 +539,7 @@ namespace ndd {
                         break;
                     }
                 }
-#endif //NDD_INV_IDX_STORE_FLOATS
+#endif // NDD_INV_IDX_STORE_FLOATS
 
                 it->current_entry_idx = idx;
                 it->advanceToNextLive();
@@ -541,12 +548,14 @@ namespace ndd {
                     sparseSearchDebugStats().phase3_iterators_contributed.fetch_add(
                             1, std::memory_order_relaxed);
                 }
-#endif
+#endif // ND_DEBUG
             }
             }
 
             {
                 LOG_TIME("search phase 4");
+            // Only scores inside the current batch can be non-zero, so convert that temporary
+            // dense buffer into top-k candidates before moving to the next window.
             for (size_t local = 0; local < batch_len; local++) {
                 float s = scores_buf[local];
                 if (s == 0.0f || s <= threshold) continue;
@@ -569,6 +578,8 @@ namespace ndd {
 
             {
                 LOG_TIME("search phase 5");
+            // Compact away exhausted iterators, then optionally prune the longest remaining list
+            // when its best possible future contribution cannot beat the current threshold.
             size_t write_idx = 0;
             for (size_t i = 0; i < iters.size(); i++) {
                 if (iters[i]->current_doc_id != EXHAUSTED_DOC_ID) {
@@ -597,7 +608,7 @@ namespace ndd {
                     << " posting_list_len=" << it.initial_entries
                     << " pruned_len=" << it.pruned_entries);
         }
-#endif
+#endif // NDD_INV_IDX_PRUNE_DEBUG
 
         for (MDBX_cursor* cursor : cursors) {
             mdbx_cursor_close(cursor);
@@ -626,6 +637,11 @@ namespace ndd {
             return 0;
 
         uint8_t result = (uint8_t)(scaled + 0.5f);
+
+        /**
+         * Since a 0 weight is considered deleted,
+         * we change it to 1
+        */
         return result == 0 ? 1 : result;
     }
 
@@ -715,7 +731,7 @@ namespace ndd {
             }
             idx += simd_width;
         }
-#endif
+#endif // USE_AVX512
 
         while (idx < size && doc_ids[idx] < target) {
             idx++;
@@ -788,7 +804,7 @@ namespace ndd {
             pg = svwhilelt_b8(idx, size);
         }
         return idx;
-#endif
+#endif // USE_AVX512
 
         while (idx < size) {
             if (values[idx] != 0) return idx;
@@ -884,7 +900,7 @@ namespace ndd {
         size_t required = sizeof(BlockHeader)
                         + n * sizeof(BlockOffset)
                         + n * sizeof(uint8_t);
-#endif //NDD_INV_IDX_STORE_FLOATS
+#endif // NDD_INV_IDX_STORE_FLOATS
 
         if (data.iov_len < required) {
             LOG_ERROR("data is corrupt. Not enough bytes as expected");
@@ -946,12 +962,14 @@ namespace ndd {
             return true;
         }
 
+        // Update/delete paths want a mutable decoded representation, so convert offsets back to
+        // absolute doc_ids here. Search stays zero-copy and does not call this helper.
         entries->resize(view.count);
 #if defined(NDD_INV_IDX_STORE_FLOATS)
         const float* vals = (const float*)view.values;
 #else
         const uint8_t* vals = (const uint8_t*)view.values;
-#endif //NDD_INV_IDX_STORE_FLOATS
+#endif // NDD_INV_IDX_STORE_FLOATS
 
         for (uint32_t i = 0; i < view.count; i++) {
             entries->at(i).doc_id = blockOffsetToDocId(block_nr, view.doc_offsets[i]);
@@ -959,12 +977,15 @@ namespace ndd {
             entries->at(i).value = vals[i];
 #else
             entries->at(i).value = dequantize(vals[i], header->max_value);
-#endif //NDD_INV_IDX_STORE_FLOATS
+#endif // NDD_INV_IDX_STORE_FLOATS
         }
 
         return true;
     }
 
+    /**
+     * Saves the block header and entries
+     */
     bool InvertedIndex::saveBlockEntries(MDBX_txn* txn,
                                         uint32_t term_id,
                                         uint32_t block_nr,
@@ -997,13 +1018,14 @@ namespace ndd {
         size_t value_size = sizeof(float);
 #else
         size_t value_size = sizeof(uint8_t);
-#endif //NDD_INV_IDX_STORE_FLOATS
+#endif // NDD_INV_IDX_STORE_FLOATS
 
         size_t total_size = sizeof(BlockHeader)
                             + (entries.size() * sizeof(BlockOffset)) //doc-local offsets
                             + (entries.size() * value_size); //doc weights
         std::vector<uint8_t> buffer(total_size);
 
+        // Serialize back into the compact on-disk layout used by the search iterator.
         std::memcpy(buffer.data(), &header, sizeof(BlockHeader));
 
         uint8_t* ptr = buffer.data() + sizeof(BlockHeader);
@@ -1040,7 +1062,7 @@ namespace ndd {
         for (size_t i = 0; i < entries.size(); i++) {
             vals_out[i] = quantize(entries[i].value, max_val);
         }
-#endif //NDD_INV_IDX_STORE_FLOATS
+#endif // NDD_INV_IDX_STORE_FLOATS
 
         uint64_t packed = packPostingKey(term_id, block_nr);
         MDBX_val key{&packed, sizeof(packed)};
@@ -1068,6 +1090,8 @@ namespace ndd {
         MDBX_txn* txn,
         uint32_t term_id,
         const std::function<bool(uint32_t block_nr, const MDBX_val& data)>& callback) const {
+        // Because keys are packed as (term_id, block_nr), all rows for one term are contiguous.
+        // A single seek is enough to walk every block that belongs to that term.
         MDBX_cursor* cursor = nullptr;
         int rc = mdbx_cursor_open(txn, blocked_term_postings_dbi_, &cursor);
         if (rc != MDBX_SUCCESS) {
@@ -1112,6 +1136,8 @@ namespace ndd {
     float InvertedIndex::recomputeGlobalMaxFromBlocks(MDBX_txn* txn, uint32_t term_id) const {
         float recomputed_max = 0.0f;
 
+        // Only needed when the previous global max may have been lowered by an in-place update
+        // or delete. We then rescan block headers to find the true max for the term.
         bool ok = iterateTermBlocks(txn,
                                     term_id,
                                     [&recomputed_max](uint32_t block_nr, const MDBX_val& data) {
@@ -1216,19 +1242,22 @@ namespace ndd {
     {
         if (docs.empty()) return true;
 
+        // Reorganize the batch by term so each term can be merged into its posting list
+        // independently. The on-disk structure is term-major.
 #ifdef ND_DEBUG
         SparseUpdateDebugStats& update_stats = sparseUpdateDebugStats();
         update_stats.add_batch_calls.fetch_add(1, std::memory_order_relaxed);
         update_stats.add_batch_docs.fetch_add(docs.size(), std::memory_order_relaxed);
         uint64_t raw_update_count = 0;
         const auto build_term_updates_start = SteadyClock::now();
-#endif
+#endif // ND_DEBUG
+
         std::unordered_map<uint32_t, std::vector<std::pair<ndd::idInt, float>>> term_updates;
 
         for (const auto& [doc_id, sparse_vec] : docs) {
 #ifdef ND_DEBUG
             raw_update_count += sparse_vec.indices.size();
-#endif
+#endif // ND_DEBUG
             for (size_t i = 0; i < sparse_vec.indices.size(); i++) {
                 uint32_t term_id = sparse_vec.indices[i];
                 if (term_id == kMetadataTermId) {
@@ -1244,12 +1273,14 @@ namespace ndd {
         update_stats.add_batch_terms.fetch_add(term_updates.size(), std::memory_order_relaxed);
         update_stats.build_term_updates_total_ns.fetch_add(
                 elapsedNsSince(build_term_updates_start), std::memory_order_relaxed);
-#endif
+#endif // ND_DEBUG
 
         for (auto& [term_id, updates] : term_updates) {
 #ifdef ND_DEBUG
             const auto sort_dedup_start = SteadyClock::now();
-#endif
+#endif // ND_DEBUG
+
+            // Merge logic below assumes doc_ids are sorted and unique per term within this batch.
             std::sort(updates.begin(), updates.end(),
                     [](const auto& a, const auto& b) { return a.first < b.first; });
 
@@ -1269,7 +1300,7 @@ namespace ndd {
                     elapsedNsSince(sort_dedup_start), std::memory_order_relaxed);
             update_stats.add_batch_deduped_updates.fetch_add(
                     deduped.size(), std::memory_order_relaxed);
-#endif
+#endif // ND_DEBUG
 
             bool header_found = false;
             PostingListHeader header = readPostingListHeader(txn, term_id, &header_found);
@@ -1286,7 +1317,10 @@ namespace ndd {
 
 #ifdef ND_DEBUG
                 update_stats.add_batch_blocks.fetch_add(1, std::memory_order_relaxed);
-#endif
+#endif // ND_DEBUG
+
+                // One MDBX record stores exactly one (term, block_nr) slice, so split the
+                // term's updates into block-local chunks before merging.
                 std::vector<std::pair<ndd::idInt, float>> block_updates(
                     deduped.begin() + block_begin, deduped.begin() + ui);
 
@@ -1294,9 +1328,10 @@ namespace ndd {
                 uint32_t old_live_count = 0;
                 float old_block_max = 0.0f;
                 bool block_found = false;
+
 #ifdef ND_DEBUG
                 const auto load_block_start = SteadyClock::now();
-#endif
+#endif // ND_DEBUG
                 bool load_ok = loadBlockEntries(txn,
                                                 term_id,
                                                 block_nr,
@@ -1310,14 +1345,16 @@ namespace ndd {
                         elapsedNsSince(load_block_start), std::memory_order_relaxed);
                 update_stats.load_block_entries_total.fetch_add(
                         existing.size(), std::memory_order_relaxed);
-#endif
+#endif // ND_DEBUG
                 if (!load_ok) {
                     return false;
                 }
 
 #ifdef ND_DEBUG
                 const auto merge_start = SteadyClock::now();
-#endif
+#endif // ND_DEBUG
+                // Classic merge of two sorted streams: existing postings in the block and the
+                // incoming updates for that same block.
                 std::vector<PostingListEntry> merged;
                 merged.reserve(existing.size() + block_updates.size());
 
@@ -1370,7 +1407,7 @@ namespace ndd {
                         block_updates.size(), std::memory_order_relaxed);
                 update_stats.merge_output_entries_total.fetch_add(
                         merged.size(), std::memory_order_relaxed);
-#endif
+#endif // ND_DEBUG
 
                 uint32_t old_total = static_cast<uint32_t>(existing.size());
                 uint32_t new_total = static_cast<uint32_t>(merged.size());
@@ -1384,7 +1421,7 @@ namespace ndd {
                 } else {
 #ifdef ND_DEBUG
                     const auto save_block_start = SteadyClock::now();
-#endif
+#endif // ND_DEBUG
                     bool save_ok = saveBlockEntries(txn,
                                                     term_id,
                                                     block_nr,
@@ -1397,7 +1434,7 @@ namespace ndd {
                             elapsedNsSince(save_block_start), std::memory_order_relaxed);
                     update_stats.save_block_entries_total.fetch_add(
                             merged.size(), std::memory_order_relaxed);
-#endif
+#endif // ND_DEBUG
                     if (!save_ok) {
                         return false;
                     }
@@ -1411,7 +1448,7 @@ namespace ndd {
                  * if the old_global_max was from this block's max and
                  * if this block's max has changed and
                  * if the new block max is less than old_global_max
-                 * then we need to recompute the global max.
+                 * then we need to recompute the global max from all blocks.
                  *
                  * recompute global max once all the blocks have been updated
                  * from this document batch.
@@ -1422,27 +1459,24 @@ namespace ndd {
                 }
             }
 
-            if (header.nr_entries == 0) {
-                if (!deletePostingListHeader(txn, term_id)) return false;
-                term_info_.erase(term_id);
-                continue;
-            }
+                if (header.nr_entries == 0) {
+                    if (!deletePostingListHeader(txn, term_id)) return false;
+                    term_info_.erase(term_id);
+                    continue;
+                }
 
-            /**
-             * Do this only if there are some live entries.
-             * else this is wasted effort.
-             */
+            // Recompute the term max only when the previous max might have been invalidated.
             if (need_recompute_max) {
 #ifdef ND_DEBUG
                 const auto recompute_max_start = SteadyClock::now();
-#endif
+#endif // ND_DEBUG
                 header.max_value = recomputeGlobalMaxFromBlocks(txn, term_id);
 #ifdef ND_DEBUG
                 update_stats.recompute_max_calls.fetch_add(1, std::memory_order_relaxed);
                 update_stats.recompute_max_total_ns.fetch_add(
                         elapsedNsSince(recompute_max_start), std::memory_order_relaxed);
-#endif
-            }
+#endif // ND_DEBUG
+            } //while (ui < deduped.size())
 
             if (header.nr_live_entries == 0) {
                 header.max_value = 0.0f;
@@ -1462,10 +1496,15 @@ namespace ndd {
         return true;
     }
 
+
     bool InvertedIndex::removeDocumentInternal(MDBX_txn* txn,
                                             ndd::idInt doc_id,
                                             const SparseVector& vec)
     {
+        /**
+         * NOTE: This can be slow right now since we provide a single vector to delete
+         * at once. It should ideally be faster with a batch.
+         */
         for (size_t i = 0; i < vec.indices.size(); i++) {
             uint32_t term_id = vec.indices[i];
             if (term_id == kMetadataTermId) continue;
@@ -1511,6 +1550,8 @@ namespace ndd {
                 continue;
             }
 
+            // Deletes are represented as zero-valued tombstones until the tombstone ratio
+            // is high enough to justify compacting the block in place.
             entries[lo].value = 0.0f;
 
             uint32_t new_live_count = old_live_count > 0 ? old_live_count - 1 : 0;
@@ -1521,6 +1562,7 @@ namespace ndd {
                 : 0.0f;
 
             if (tombstone_ratio >= settings::INV_IDX_COMPACTION_TOMBSTONE_RATIO) {
+                //Compact deleted entries
                 size_t write = 0;
                 for (size_t j = 0; j < entries.size(); j++) {
                     if (entries[j].value > 0.0f) {
@@ -1601,6 +1643,9 @@ namespace ndd {
     {
         if (iters.size() < 2) return;
 
+        // Pruning only ever advances the single longest remaining list. That keeps the rule
+        // simple: if even its maximum possible future contribution cannot beat the current
+        // threshold, skip ahead to where the other lists resume.
         size_t longest_idx = 0;
         uint32_t longest_rem = 0;
         for (size_t i = 0; i < iters.size(); i++) {
@@ -1636,7 +1681,7 @@ namespace ndd {
         if (max_possible <= min_score) {
 #ifdef NDD_INV_IDX_PRUNE_DEBUG
             uint32_t remaining_before_prune = longest->remaining_entries;
-#endif
+#endif // NDD_INV_IDX_PRUNE_DEBUG
             if (others_min_doc_id == EXHAUSTED_DOC_ID) {
                 longest->current_doc_id = EXHAUSTED_DOC_ID;
                 longest->remaining_entries = 0;
@@ -1648,7 +1693,7 @@ namespace ndd {
                 longest->pruned_entries +=
                     (remaining_before_prune - longest->remaining_entries);
             }
-#endif
+#endif // NDD_INV_IDX_PRUNE_DEBUG
         }
     }
 
@@ -1681,8 +1726,10 @@ namespace ndd {
 #ifdef NDD_INV_IDX_PRUNE_DEBUG
         initial_entries = total_entries;
         pruned_entries = 0;
-#endif
+#endif // NDD_INV_IDX_PRUNE_DEBUG
 
+        // Position the iterator on the first non-empty block and then on the first live entry
+        // inside that block.
         if (!loadFirstBlock()) {
             current_doc_id = EXHAUSTED_DOC_ID;
             remaining_entries = 0;
@@ -1697,7 +1744,7 @@ namespace ndd {
                                                             const MDBX_val& data) {
 #ifdef ND_DEBUG
         ParseCurrentKVTimer parse_timer;
-#endif
+#endif // ND_DEBUG
         if (key.iov_len != sizeof(uint64_t)) {
             return false;
         }
@@ -1716,6 +1763,8 @@ namespace ndd {
             return false;
         }
 
+        // Keep raw pointers into the MDBX value so search can read offsets/weights without
+        // allocating or copying the block payload.
         current_block_nr = block_nr;
         doc_offsets = view.doc_offsets;
         values_ptr = view.values;
@@ -1732,6 +1781,7 @@ namespace ndd {
         MDBX_val key{&seek_packed, sizeof(seek_packed)};
         MDBX_val data;
 
+        // Seek once into the contiguous key range for this term, then skip any empty blocks.
         int rc = mdbx_cursor_get(cursor, &key, &data, MDBX_SET_RANGE);
         while (rc == MDBX_SUCCESS) {
             if (key.iov_len != sizeof(uint64_t)) return false;
@@ -1766,6 +1816,8 @@ namespace ndd {
         MDBX_val data;
         int rc = mdbx_cursor_get(cursor, &key, &data, MDBX_NEXT);
 
+        // Stop as soon as the cursor leaves this term's key range. The next term or metadata row
+        // belongs to a different posting list.
         while (rc == MDBX_SUCCESS) {
             if (key.iov_len != sizeof(uint64_t)) {
                 current_doc_id = EXHAUSTED_DOC_ID;
@@ -1822,10 +1874,13 @@ namespace ndd {
             }
 
             if (current_entry_idx < data_size) {
+                // Found the next non-zero value in the current block.
                 current_doc_id = docIdAt(current_entry_idx);
                 return;
             }
 
+            // Current block is exhausted; keep scanning forward until we find another non-empty block
+            // or run out of rows for this term.
             if (!loadNextBlock()) {
                 current_doc_id = EXHAUSTED_DOC_ID;
                 return;
@@ -1852,6 +1907,7 @@ namespace ndd {
 
             const uint32_t target_block_nr = docToBlockNr(target_doc_id);
             if (current_block_nr < target_block_nr) {
+                // Target is in a later block, so skip the remainder of the current block at once.
                 consumeEntries(data_size - current_entry_idx);
                 if (!loadNextBlock()) {
                     current_doc_id = EXHAUSTED_DOC_ID;
@@ -1868,6 +1924,8 @@ namespace ndd {
             }
 
             const BlockOffset target_offset = docToBlockOffset(target_doc_id);
+            // Within the block, offsets are sorted, so a lower_bound finds the first candidate
+            // doc_id without decoding the entire block into absolute ids.
             const BlockOffset* begin = doc_offsets + current_entry_idx;
             const BlockOffset* end = doc_offsets + data_size;
             const BlockOffset* next =
