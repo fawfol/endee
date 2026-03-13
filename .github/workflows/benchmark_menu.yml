@@ -113,7 +113,7 @@ jobs:
         with:
           script: |
             const headSha = context.payload.workflow_run.head_sha;
-            const headRef = context.payload.workflow_run.head_ref;
+            const headRef = context.payload.workflow_run.head_branch;
 
             core.setOutput('head_sha', headSha);
             core.setOutput('head_ref', headRef);
@@ -126,7 +126,7 @@ jobs:
               head: `${context.repo.owner}:${headRef}`,
             });
 
-            const pr = prs.find(pr => p.head.sha === headSha);
+            const pr = prs.find(p => p.head.sha === headSha);
             if (!pr) {
               core.warning(`No Open PR Found for SHA ${headSha} - skipping`);
               core.setOutput('pr_number', '');
@@ -222,10 +222,6 @@ jobs:
               await github.rest.issues.updateComment({
               
               owner, repo, comment_id: existing.id, body
-              })
-            } else {
-              await github.rest.issues.createComment({
-                owner, repo, issue_number: prNumber, body,
               });
               core.info(`Updated existing comment #${existing.id}`);
             } else {
