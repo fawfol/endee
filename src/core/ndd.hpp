@@ -469,9 +469,8 @@ public:
     }
 
 public:
-    IndexManager(size_t max_indices,
-                 const std::string& data_dir,
-                 const PersistenceConfig& persistence_config = PersistenceConfig{}) :
+    IndexManager(const std::string& data_dir,
+                const PersistenceConfig& persistence_config = PersistenceConfig{}) :
         data_dir_(data_dir),
         persistence_config_(persistence_config),
         backup_store_(data_dir) {

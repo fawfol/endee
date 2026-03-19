@@ -243,7 +243,6 @@ int main(int argc, char** argv) {
     LOG_INFO("DEFAULT_USERNAME: " << settings::DEFAULT_USERNAME);
     LOG_INFO("DEFAULT_SERVER_TYPE: " << settings::DEFAULT_SERVER_TYPE);
     LOG_INFO("DEFAULT_DATA_DIR: " << settings::DEFAULT_DATA_DIR);
-    LOG_INFO("DEFAULT_MAX_ACTIVE_INDICES: " << settings::DEFAULT_MAX_ACTIVE_INDICES);
     LOG_INFO("DEFAULT_MAX_ELEMENTS: " << settings::DEFAULT_MAX_ELEMENTS);
     LOG_INFO("DEFAULT_MAX_ELEMENTS_INCREMENT: " << settings::DEFAULT_MAX_ELEMENTS_INCREMENT);
     LOG_INFO("DEFAULT_MAX_ELEMENTS_INCREMENT_TRIGGER: "
@@ -269,7 +268,7 @@ int main(int argc, char** argv) {
     LOG_INFO(1005, "Starting the server");
     AuthManager auth_manager(data_dir);
     LOG_INFO(1006, "Created auth manager");
-    IndexManager index_manager(settings::MAX_ACTIVE_INDICES, data_dir, persistence_config);
+    IndexManager index_manager(data_dir, persistence_config);
     LOG_INFO(1007, "Created index manager");
 
     // Initialize the app
@@ -431,7 +430,7 @@ int main(int argc, char** argv) {
                     LOG_INFO(1018, index_id, "Creating index with custom size: " << size_in_millions << "M vectors");
                 }
 
-                if(body.has("sparse_dim") || body.has("sparse_scoring_model")) {
+                if(body.has("sparse_dim")) {
                     LOG_WARN(1019,
                              index_id,
                              "Create-index request used legacy sparse fields");

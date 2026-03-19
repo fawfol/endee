@@ -91,7 +91,6 @@ namespace settings {
     const std::string DEFAULT_DATA_DIR = "/mnt/data";
     const std::string DEFAULT_SUBINDEX = "default";
     constexpr size_t MAX_NR_SUBINDEX = 100; //Maximum number of subindexes
-    constexpr size_t DEFAULT_MAX_ACTIVE_INDICES = 64;
     constexpr size_t DEFAULT_MAX_ELEMENTS = 100'000;
     constexpr size_t DEFAULT_MAX_ELEMENTS_INCREMENT = 100'000;
     constexpr size_t DEFAULT_MAX_ELEMENTS_INCREMENT_TRIGGER = 50'000;
@@ -141,14 +140,10 @@ namespace settings {
         const char* env = std::getenv("NDD_SERVER_TYPE");
         return env ? std::string(env) : DEFAULT_SERVER_TYPE;
     }();
+
     inline static std::string DATA_DIR = [] {
         const char* env = std::getenv("NDD_DATA_DIR");
         return env ? std::string(env) : DEFAULT_DATA_DIR;
-    }();
-
-    inline static size_t MAX_ACTIVE_INDICES = [] {
-        const char* env = std::getenv("NDD_MAX_ACTIVE_INDICES");
-        return env ? std::stoull(env) : DEFAULT_MAX_ACTIVE_INDICES;
     }();
 
     inline static size_t MAX_ELEMENTS = [] {
