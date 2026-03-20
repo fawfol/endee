@@ -51,11 +51,11 @@ namespace settings {
     constexpr size_t ID_MAPPER_MAP_SIZE_BITS = 24;      // 16 MiB
     constexpr size_t ID_MAPPER_MAP_SIZE_MAX_BITS = 33;  // 8 GiB
     constexpr size_t FILTER_MAP_SIZE_BITS = 24;         // 16 MiB
-    constexpr size_t FILTER_MAP_SIZE_MAX_BITS = 36;     // 64 GiB
+    constexpr size_t FILTER_MAP_SIZE_MAX_BITS = 30;     // 64 GiB
     constexpr size_t METADATA_MAP_SIZE_BITS = 27;       // 128 MiB
-    constexpr size_t METADATA_MAP_SIZE_MAX_BITS = 39;   // 512 GiB
+    constexpr size_t METADATA_MAP_SIZE_MAX_BITS = 30;   // 512 GiB
     constexpr size_t VECTOR_MAP_SIZE_BITS = 30;         // 1 GiB
-    constexpr size_t VECTOR_MAP_SIZE_MAX_BITS = 42;     // 4 TiB
+    constexpr size_t VECTOR_MAP_SIZE_MAX_BITS = 30;     // 4 TiB
 
     constexpr size_t MAX_LINK_LIST_LOCKS = 65536;
 

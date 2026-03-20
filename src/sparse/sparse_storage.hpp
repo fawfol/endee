@@ -271,7 +271,7 @@ namespace ndd {
             }
 
             // Set geometry (max 1TB for now, can be configured)
-            rc = mdbx_env_set_geometry(env_, -1, -1, TB, -1, -1, -1);
+            rc = mdbx_env_set_geometry(env_, -1, -1, GB, -1, -1, -1);
             if(rc != 0) {
                 LOG_ERROR(2246, index_id_, "mdbx_env_set_geometry failed: " << mdbx_strerror(rc));
                 return false;
