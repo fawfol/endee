@@ -83,6 +83,7 @@ namespace settings {
     constexpr size_t DEFAULT_NUM_PARALLEL_INSERTS = 4;
     constexpr size_t DEFAULT_NUM_RECOVERY_THREADS = 16;
     constexpr size_t DEFAULT_MAX_MEMORY_GB = 24;
+    constexpr size_t MAX_LIVE_INDICES = 255;
     constexpr bool DEFAULT_ENABLE_DEBUG_LOG = true;
     const std::string DEFAULT_AUTH_TOKEN = "";
     inline static std::string DEFAULT_USERNAME = "endee";

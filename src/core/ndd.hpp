@@ -311,8 +311,8 @@ private:
             std::unique_lock<std::shared_mutex> write_lock(indices_mutex_);
             auto it = indices_.find(index_id);
             if(it == indices_.end()) {
+                ensureLiveIndexCapacity(index_id, "load index");
                 loadIndex(index_id);  // modifies indices_
-                evictIfNeeded();      // Clean eviction only
             }
             it = indices_.find(index_id);
             if(it == indices_.end()) {
@@ -385,38 +385,65 @@ private:
     }
 
 public:
-    // Evict the last index if the total size exceeds the limit
+
     void evictIfNeeded() {
-        // Go through indices and get the total size. If it exceeds the limit, evict the last one
-        size_t total_size = 0;
-        for(auto& [index_id, entry] : indices_) {
-            if(entry.alg) {
-                total_size += entry.alg->getApproxSizeGB();
+        size_t max_attempts = std::max(indices_list_.size(), indices_.size());
+        while(indices_.size() >= settings::MAX_LIVE_INDICES && max_attempts > 0) {
+            if(indices_list_.empty()) {
+                LOG_ERROR(2048, "Cannot evict index: indices_list_ is empty while cache is full");
+                return;
             }
-        }
-        if(total_size > settings::MAX_MEMORY_GB) {
-            // Make sure that there is at least one index in memory and we use only 80% of the total
-            // size
-            while((total_size > 0.80 * settings::MAX_MEMORY_GB) && (indices_list_.size() > 1)) {
-                // Pop from the back of the active indices list
-                std::string to_evict = indices_list_.back();
+
+            std::string to_evict = indices_list_.back();
+            auto it = indices_.find(to_evict);
+            if(it == indices_.end()) {
+                LOG_WARN(2049, to_evict, "Dropping stale eviction candidate from indices_list_");
                 indices_list_.pop_back();
-                auto it = indices_.find(to_evict);
-                if(it != indices_.end()) {
-                    total_size -= it->second.alg->getApproxSizeGB();
-
-                    // Only evict if the index is not dirty (hasn't been updated)
-                    if(it->second.updated) {
-                        LOG_WARN(2015, to_evict, "Cannot evict dirty index; it must be saved first");
-                        // Put it back at the front to try other indices
-                        indices_list_.push_front(to_evict);
-                        continue;
-                    }
-
-                    LOG_INFO(2016, to_evict, "Evicting clean index from cache");
-                    indices_.erase(it);
-                }
+                --max_attempts;
+                continue;
             }
+
+            try {
+                std::lock_guard<std::mutex> operation_lock(it->second.operation_mutex);
+                if(it->second.updated) {
+                    LOG_INFO(2050, to_evict, "Saving dirty index before eviction");
+                    saveIndexInternal(it->second);
+                }
+            } catch(const std::exception& e) {
+                LOG_ERROR(2051, to_evict, "Failed to save dirty index during eviction: " << e.what());
+                return;
+            }
+
+            if(it->second.updated) {
+                LOG_WARN(2054, to_evict, "Index remained dirty after forced save; aborting eviction");
+                return;
+            }
+
+            LOG_INFO(2016, to_evict, "Evicting clean index from cache");
+            indices_.erase(it);
+            indices_list_.pop_back();
+            --max_attempts;
+        }
+
+        if(indices_.size() >= settings::MAX_LIVE_INDICES) {
+            LOG_ERROR(2052,
+                      "Eviction attempts exhausted while live index cache remains at limit");
+        }
+    }
+
+    void ensureLiveIndexCapacity(const std::string& index_id, const char* action) {
+        if(indices_.size() < settings::MAX_LIVE_INDICES) {
+            return;
+        }
+
+        evictIfNeeded();
+        if(indices_.size() >= settings::MAX_LIVE_INDICES) {
+            LOG_ERROR(2047,
+                      index_id,
+                      "Unable to " << action << ": live index cache remains at limit "
+                                    << settings::MAX_LIVE_INDICES);
+            throw std::runtime_error("Unable to " + std::string(action)
+                                     + ": live index cache is full");
         }
     }
 
@@ -599,7 +626,7 @@ public:
         // Evict if needed (clean indices only)
         {
             std::unique_lock<std::shared_mutex> temp_lock(indices_mutex_);
-            evictIfNeeded();
+            ensureLiveIndexCapacity(index_id, "create index");
         }
 
         hnswlib::SpaceType space_type = hnswlib::getSpaceType(config.space_type_str);
