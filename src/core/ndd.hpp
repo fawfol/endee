@@ -1203,7 +1203,12 @@ public:
         try {
             auto& entry = getIndexEntry(index_id);
 
-            std::shared_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
+            /**
+             * XXX: We aren't using reader's lock here to enable reads while
+             * writing.
+             * TODO: check correctness when stressing the system.
+             */
+            // std::shared_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
 
             ndd::idInt numeric_id = entry.id_mapper->get_id(str_id);
             if(numeric_id == 0) {
@@ -1405,7 +1410,13 @@ public:
         constexpr float kRrfRankConstant = 60.0f;
         try {
             auto& entry = getIndexEntry(index_id);
-            std::shared_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
+
+            /**
+             * XXX: We aren't using reader's lock here to enable reads while
+             * writing.
+             * TODO: check correctness when stressing the system.
+             */
+            // std::shared_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
 
             entry.searchCount += k;
 
@@ -1690,6 +1701,13 @@ public:
 
     std::optional<IndexInfo> getIndexInfo(const std::string& index_id) {
         auto& entry = getIndexEntry(index_id);
+
+        /**
+         * XXX: We aren't using reader's lock here to enable reads while
+         * writing.
+         * TODO: check correctness when stressing the system.
+         * check other instances of shared_lock on operation_mutex.
+         */
         std::shared_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
         IndexInfo indx = {entry.alg->getElementsCount(),
                           entry.alg->getDimension(),
@@ -1856,7 +1874,15 @@ inline void IndexManager::executeBackupJob(const std::string& index_id, const st
         auto& entry = getIndexEntry(index_id);
         std::string metadata_file_in_index = source_dir + "/metadata.json";
         {
-            std::shared_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
+            /**
+             * NOTE: While making a backup is a reading operation on the index,
+             * we are picking a writer's lock here because we have disabled reader's
+             * locks on other instances of read in the system right now.
+             *
+             * This is to enable reads while writes are happening on the index.
+             * Check other instances of shared_lock on operation_mutex.
+             */
+            std::unique_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
 
             saveIndexInternal(entry);
 
