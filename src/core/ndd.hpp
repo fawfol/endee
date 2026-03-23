@@ -1856,7 +1856,7 @@ inline void IndexManager::executeBackupJob(const std::string& index_id, const st
         auto& entry = getIndexEntry(index_id);
         std::string metadata_file_in_index = source_dir + "/metadata.json";
         {
-            std::unique_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
+            std::shared_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
 
             saveIndexInternal(entry);
 
