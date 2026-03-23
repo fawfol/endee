@@ -45,17 +45,19 @@ namespace settings {
 
     // MDBX default map sizes. Growth step and initial size are the same for all databases.
     // System tables
-    constexpr size_t INDEX_META_MAP_SIZE_BITS = 21;      // 2 MiB
-    constexpr size_t INDEX_META_MAP_SIZE_MAX_BITS = 27;  // 128 MiB
+    constexpr size_t DEFAULT_INDEX_META_MAP_SIZE_BITS = 21;      // 2 MiB
+    constexpr size_t DEFAULT_INDEX_META_MAP_SIZE_MAX_BITS = 27;  // 128 MiB
     // Index-related tables
-    constexpr size_t ID_MAPPER_MAP_SIZE_BITS = 24;      // 16 MiB
-    constexpr size_t ID_MAPPER_MAP_SIZE_MAX_BITS = 33;  // 8 GiB
-    constexpr size_t FILTER_MAP_SIZE_BITS = 24;         // 16 MiB
-    constexpr size_t FILTER_MAP_SIZE_MAX_BITS = 30;     // 64 GiB
-    constexpr size_t METADATA_MAP_SIZE_BITS = 27;       // 128 MiB
-    constexpr size_t METADATA_MAP_SIZE_MAX_BITS = 30;   // 512 GiB
-    constexpr size_t VECTOR_MAP_SIZE_BITS = 30;         // 1 GiB
-    constexpr size_t VECTOR_MAP_SIZE_MAX_BITS = 30;     // 4 TiB
+    constexpr size_t DEFAULT_ID_MAPPER_MAP_SIZE_BITS = 24;      // 16 MiB
+    constexpr size_t DEFAULT_ID_MAPPER_MAP_SIZE_MAX_BITS = 33;  // 8 GiB
+    constexpr size_t DEFAULT_FILTER_MAP_SIZE_BITS = 24;         // 16 MiB
+    constexpr size_t DEFAULT_FILTER_MAP_SIZE_MAX_BITS = 36;     // 64 GiB
+    constexpr size_t DEFAULT_METADATA_MAP_SIZE_BITS = 27;       // 128 MiB
+    constexpr size_t DEFAULT_METADATA_MAP_SIZE_MAX_BITS = 39;   // 512 GiB
+    constexpr size_t DEFAULT_VECTOR_MAP_SIZE_BITS = 30;         // 1 GiB
+    constexpr size_t DEFAULT_VECTOR_MAP_SIZE_MAX_BITS = 42;     // 4 TiB
+    // Sparse storage
+    constexpr size_t DEFAULT_SPARSE_MAP_SIZE_MAX_BITS = 40;    // 1 TiB
 
     constexpr size_t MAX_LINK_LIST_LOCKS = 65536;
 
@@ -202,6 +204,52 @@ namespace settings {
 
     inline static bool AUTH_ENABLED = !AUTH_TOKEN.empty();
 
+    // MDBX map sizes (bit counts, used as 1ULL << N)
+    inline static size_t INDEX_META_MAP_SIZE_BITS = [] {
+        const char* env = std::getenv("NDD_INDEX_META_MAP_SIZE_BITS");
+        return env ? std::stoull(env) : DEFAULT_INDEX_META_MAP_SIZE_BITS;
+    }();
+    inline static size_t INDEX_META_MAP_SIZE_MAX_BITS = [] {
+        const char* env = std::getenv("NDD_INDEX_META_MAP_SIZE_MAX_BITS");
+        return env ? std::stoull(env) : DEFAULT_INDEX_META_MAP_SIZE_MAX_BITS;
+    }();
+    inline static size_t ID_MAPPER_MAP_SIZE_BITS = [] {
+        const char* env = std::getenv("NDD_ID_MAPPER_MAP_SIZE_BITS");
+        return env ? std::stoull(env) : DEFAULT_ID_MAPPER_MAP_SIZE_BITS;
+    }();
+    inline static size_t ID_MAPPER_MAP_SIZE_MAX_BITS = [] {
+        const char* env = std::getenv("NDD_ID_MAPPER_MAP_SIZE_MAX_BITS");
+        return env ? std::stoull(env) : DEFAULT_ID_MAPPER_MAP_SIZE_MAX_BITS;
+    }();
+    inline static size_t FILTER_MAP_SIZE_BITS = [] {
+        const char* env = std::getenv("NDD_FILTER_MAP_SIZE_BITS");
+        return env ? std::stoull(env) : DEFAULT_FILTER_MAP_SIZE_BITS;
+    }();
+    inline static size_t FILTER_MAP_SIZE_MAX_BITS = [] {
+        const char* env = std::getenv("NDD_FILTER_MAP_SIZE_MAX_BITS");
+        return env ? std::stoull(env) : DEFAULT_FILTER_MAP_SIZE_MAX_BITS;
+    }();
+    inline static size_t METADATA_MAP_SIZE_BITS = [] {
+        const char* env = std::getenv("NDD_METADATA_MAP_SIZE_BITS");
+        return env ? std::stoull(env) : DEFAULT_METADATA_MAP_SIZE_BITS;
+    }();
+    inline static size_t METADATA_MAP_SIZE_MAX_BITS = [] {
+        const char* env = std::getenv("NDD_METADATA_MAP_SIZE_MAX_BITS");
+        return env ? std::stoull(env) : DEFAULT_METADATA_MAP_SIZE_MAX_BITS;
+    }();
+    inline static size_t VECTOR_MAP_SIZE_BITS = [] {
+        const char* env = std::getenv("NDD_VECTOR_MAP_SIZE_BITS");
+        return env ? std::stoull(env) : DEFAULT_VECTOR_MAP_SIZE_BITS;
+    }();
+    inline static size_t VECTOR_MAP_SIZE_MAX_BITS = [] {
+        const char* env = std::getenv("NDD_VECTOR_MAP_SIZE_MAX_BITS");
+        return env ? std::stoull(env) : DEFAULT_VECTOR_MAP_SIZE_MAX_BITS;
+    }();
+    inline static size_t SPARSE_MAP_SIZE_MAX_BITS = [] {
+        const char* env = std::getenv("NDD_SPARSE_MAP_SIZE_MAX_BITS");
+        return env ? std::stoull(env) : DEFAULT_SPARSE_MAP_SIZE_MAX_BITS;
+    }();
+
     // Function to get all settings values as a multiline string
     inline std::string getAllSettingsAsString() {
         std::ostringstream oss;
@@ -220,6 +268,18 @@ namespace settings {
         oss << "ENABLE_DEBUG_LOG: " << (ENABLE_DEBUG_LOG ? "true" : "false") << "\n";
         oss << "AUTH_ENABLED: " << (AUTH_ENABLED ? "true" : "false") << "\n";
         oss << "DEFAULT_USERNAME: " << DEFAULT_USERNAME << "\n";
+        oss << "\n=== MDBX Map Sizes (bit shifts) ===\n";
+        oss << "INDEX_META_MAP_SIZE_BITS: " << INDEX_META_MAP_SIZE_BITS << "\n";
+        oss << "INDEX_META_MAP_SIZE_MAX_BITS: " << INDEX_META_MAP_SIZE_MAX_BITS << "\n";
+        oss << "ID_MAPPER_MAP_SIZE_BITS: " << ID_MAPPER_MAP_SIZE_BITS << "\n";
+        oss << "ID_MAPPER_MAP_SIZE_MAX_BITS: " << ID_MAPPER_MAP_SIZE_MAX_BITS << "\n";
+        oss << "FILTER_MAP_SIZE_BITS: " << FILTER_MAP_SIZE_BITS << "\n";
+        oss << "FILTER_MAP_SIZE_MAX_BITS: " << FILTER_MAP_SIZE_MAX_BITS << "\n";
+        oss << "METADATA_MAP_SIZE_BITS: " << METADATA_MAP_SIZE_BITS << "\n";
+        oss << "METADATA_MAP_SIZE_MAX_BITS: " << METADATA_MAP_SIZE_MAX_BITS << "\n";
+        oss << "VECTOR_MAP_SIZE_BITS: " << VECTOR_MAP_SIZE_BITS << "\n";
+        oss << "VECTOR_MAP_SIZE_MAX_BITS: " << VECTOR_MAP_SIZE_MAX_BITS << "\n";
+        oss << "SPARSE_MAP_SIZE_MAX_BITS: " << SPARSE_MAP_SIZE_MAX_BITS << "\n";
         oss << "\n=== End Settings ===\n";
         return oss.str();
     }
