@@ -38,6 +38,7 @@ namespace settings {
     constexpr size_t SAVE_EVERY_N_UPDATES = 10'000;
     constexpr size_t RECOVERY_BATCH_SIZE = 20'000;
     constexpr size_t SAVE_EVERY_N_MINUTES = 30;
+    constexpr size_t AUTOSAVE_SLEEP_MINUTES = 5;
     // Number of threads for http server - 0 means it will default to hardware concurrency
     constexpr size_t DEFAULT_NUM_SERVER_THREADS = 0;
     // Number of save mutexes for parallel saves
@@ -85,7 +86,12 @@ namespace settings {
     constexpr size_t DEFAULT_NUM_PARALLEL_INSERTS = 4;
     constexpr size_t DEFAULT_NUM_RECOVERY_THREADS = 16;
     constexpr size_t DEFAULT_MAX_MEMORY_GB = 24;
+
+    /**
+     * Look at docs/memory_management.md
+     */
     constexpr size_t MAX_LIVE_INDICES = 255;
+
     constexpr bool DEFAULT_ENABLE_DEBUG_LOG = true;
     const std::string DEFAULT_AUTH_TOKEN = "";
     inline static std::string DEFAULT_USERNAME = "endee";

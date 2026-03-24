@@ -91,8 +91,15 @@ struct CacheEntry {
      * readers and writers. ie. currently it could be the case that either
      * reads or writes can starve if other is being flooded.
      *
-     * If that is required, we will have to implement a custom reader-writer
+     * TODO: If that is required, we will have to implement a custom reader-writer
      * locking mechanism with a ticketing system to guarantee fairness.
+     *
+     * XXX: We want readers to work even when writers are happening on an index
+     * If we use a reader's lock in read path, long running writes will starve 
+     * them. So for now, we are not using readers lock. This doesnt affect
+     * correctness for now. Access-after-delete errors are handled by making
+     * CacheEntry a shared_ptr in IndexManager.
+     * TODO: Revisit the locking mechanism to make it finegrained for performance.
      */
     std::shared_mutex operation_mutex;
 
@@ -275,8 +282,8 @@ private:
     void autosaveLoop() {
         LOG_INFO(2011, "Autosave thread started");
         while(running_) {
-            // Sleep for 5 minutes
-            std::this_thread::sleep_for(std::chrono::minutes(5));
+            // Sleep for AUTOSAVE_SLEEP_MINUTES
+            std::this_thread::sleep_for(std::chrono::minutes(settings::AUTOSAVE_SLEEP_MINUTES));
 
             // Check if we're still running
             if(!running_) {
@@ -293,21 +300,23 @@ private:
         std::vector<std::string> indices_to_save;
         auto now = std::chrono::system_clock::now();
 
-        // First identify indices to save (without holding main mutex for too long)
+        /**
+         * Identify the dirty indices without holding indices_mutex_ for too long
+         */
         {
             std::shared_lock<std::shared_mutex> read_lock(indices_mutex_);
             for(const auto& [index_id, entry] : indices_) {
                 if(entry && entry->updated) {
                     auto time_since_update = now - entry->updated_at;
-                    // Save if more than 60 minutes since update
-                    if(time_since_update > std::chrono::minutes(60)) {
+                    // Save if more than SAVE_EVERY_N_MINUTES minutes since update
+                    if(time_since_update > std::chrono::minutes(settings::SAVE_EVERY_N_MINUTES)) {
                         indices_to_save.push_back(index_id);
                     }
                 }
             }
         }
 
-        // Now save each index individually
+        /* Write each dirty index back */
         for(const auto& index_id : indices_to_save) {
             bool should_save = false;
             {
@@ -323,9 +332,16 @@ private:
         }
     }
 
-    // Get index entry with proper lock management - does NOT hold locks after return
+    /**
+     * Returns the shared_ptr to CacheEntry
+     * 1. If Index is active (in-memory), return from there
+     * 2. Else, fetch from disk, make active and then return.
+     */
     std::shared_ptr<CacheEntry> getIndexEntry(const std::string& index_id) {
-        // First try to find the index without write lock
+        /**
+         * First check if this index is in memory.
+         * A read lock on indices_mutex_ is enough for this.
+         */
         {
             std::shared_lock<std::shared_mutex> read_lock(indices_mutex_);
             auto it = indices_.find(index_id);
@@ -334,7 +350,10 @@ private:
             }
         }
 
-        // Index not found, need to load it with write lock
+        /**
+         * Index not found in memory.
+         * Hold a write lock on indices_mutex_ and fetch it from disk
+         */
         {
             std::unique_lock<std::shared_mutex> write_lock(indices_mutex_);
             auto it = indices_.find(index_id);
@@ -344,9 +363,8 @@ private:
             }
             it = indices_.find(index_id);
             if(it == indices_.end()) {
-                throw std::runtime_error("[ERROR] Failed to load index");
+                throw std::runtime_error("[ERROR] Index " + index_id + " doesnt exist.");
             }
-            // Return shared pointer - write_lock will be released when this scope ends
             return it->second;
         }
     }
@@ -414,6 +432,14 @@ private:
 
 public:
 
+    /**
+     * TODO:
+     * This function is currently triggered by:
+     * 1.
+     * 2.
+     *
+     * For more look at docs/memory_management.md
+     */
     void evictIfNeeded() {
         size_t max_attempts = std::max(indices_list_.size(), indices_.size());
         while(indices_.size() >= settings::MAX_LIVE_INDICES && max_attempts > 0) {
@@ -476,51 +502,6 @@ public:
         }
     }
 
-    // Function to be called by cron job instead of running as a thread
-    bool autoSave() {
-        std::vector<std::string> indices_to_save;
-
-        {
-            std::shared_lock<std::shared_mutex> read_lock(indices_mutex_);
-            for(const auto& [index_id, entry] : indices_) {
-                if(entry && entry->updated) {  // Check the flag in CacheEntry
-                    indices_to_save.push_back(index_id);
-                }
-            }
-        }
-
-        // Now save each index that needs saving
-        bool saved_any = false;
-        for(const auto& index_id : indices_to_save) {
-            LOG_DEBUG("Auto-saving index: " << index_id);
-
-            // Check if index still exists and needs saving (thread-safe)
-            bool should_save = false;
-            {
-                std::shared_lock<std::shared_mutex> read_lock(indices_mutex_);
-                auto it = indices_.find(index_id);
-                should_save = (it != indices_.end() && it->second && it->second->updated);
-            }
-
-            if(should_save) {
-                LOG_DEBUG("Autosaving index: " << index_id);
-                saveIndex(index_id);
-
-                // Reset the flag after saving (thread-safe)
-                {
-                    std::unique_lock<std::shared_mutex> write_lock(indices_mutex_);
-                    auto it = indices_.find(index_id);
-                    if(it != indices_.end()) {
-                        it->second->updated = false;
-                    }
-                }
-                saved_any = true;
-            }
-        }
-
-        return saved_any;
-    }
-
     std::string getUserPath(const std::string& username) { return data_dir_ + "/" + username; }
 
     std::string getIndexPath(const std::string& username, const std::string& index_name) {
@@ -543,14 +524,25 @@ public:
         // Signal autosave thread to stop
         running_ = false;
 
-        // Don't wait for autosave thread to exit. This allows quick restart
+        /**
+         * Don't wait for autosave thread to exit.
+         * Since the thread might be sleeping, waiting for join
+         * would be time consuming.
+         *
+         * TODO: This is a stop-gap solution.
+         * Fix it with conditional variables.
+         */
         if(autosave_thread_.joinable()) {
             autosave_thread_.detach();
         }
+
+        /**
+         * Persist all the dirty indices to disk.
+         */
         if(persistence_config_.save_on_shutdown) {
             shutdown_requested_ = true;
             persistence_cv_.notify_all();
-            LOG_DEBUG("Saving indices during shutdown");
+            LOG_INFO("Saving indices during shutdown");
             std::vector<std::string> indices_to_save;
             {
                 std::shared_lock<std::shared_mutex> read_lock(indices_mutex_);
@@ -570,7 +562,7 @@ public:
                                     "Failed to save index during shutdown: " << e.what());
                 }
             }
-            LOG_DEBUG("Shutdown complete");
+            LOG_INFO("Shutdown complete");
         }
     }
 
