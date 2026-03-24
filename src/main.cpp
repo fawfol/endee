@@ -818,7 +818,7 @@ int main(int argc, char** argv) {
                 std::string index_id = ctx.username + "/" + index_name;
 
                 try {
-                    auto progress = index_manager.getRebuildProgress(ctx.username);
+                    auto progress = index_manager.getRebuildProgress(ctx.username, index_id);
                     crow::response res;
                     res.code = 200;
                     res.set_header("Content-Type", "application/json");

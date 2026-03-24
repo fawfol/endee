@@ -1764,9 +1764,10 @@ public:
         return rebuild_.hasActiveRebuild(username);
     }
 
-    nlohmann::json getRebuildProgress(const std::string& username) const {
+    nlohmann::json getRebuildProgress(const std::string& username,
+                                      const std::string& index_id) const {
         auto state = rebuild_.getActiveRebuild(username);
-        if (state) {
+        if (state && state->index_id == index_id) {
             size_t processed = state->vectors_processed.load();
             size_t total = state->total_vectors.load();
             double percent = total > 0 ? (100.0 * processed / total) : 0.0;
@@ -2202,7 +2203,7 @@ inline void IndexManager::executeRebuildJob(const std::string& index_id,
 
         // Phase 3 — Save final + Copy + Swap
 
-        // Save new graph to timestamped file (kept permanently)
+        // Save new graph to timestamped file 
         new_alg->saveIndex(timestamped_path);
 
         // Copy to canonical name (overwrites old default.idx on disk)
@@ -2225,9 +2226,12 @@ inline void IndexManager::executeRebuildJob(const std::string& index_id,
 
         entry.alg = std::move(fresh_alg);
 
-        // Delete temp checkpoint
+        // Delete temp checkpoint and timestamped file
         if (std::filesystem::exists(temp_path)) {
             std::filesystem::remove(temp_path);
+        }
+        if (std::filesystem::exists(timestamped_path)) {
+            std::filesystem::remove(timestamped_path);
         }
 
         // Update metadata with new config
