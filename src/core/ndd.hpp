@@ -64,10 +64,13 @@ struct CacheEntry {
     std::unique_ptr<WriteAheadLog> wal;
     std::chrono::system_clock::time_point last_access;
     std::chrono::system_clock::time_point last_saved_at;
-    std::chrono::system_clock::time_point updated_at;
+    std::chrono::system_clock::time_point last_dirtied_at;
 
-    // Flag to indicate if the index has been updated
-    bool updated{false};
+    /**
+     * Indicates if the index has unsaved in-memory changes
+     * is_dirty = true -> the index has not been persisted in storage
+     */
+    bool is_dirty{false};
 
     /**
      * cache_valid marks whether this CacheEntry is still the active entry
@@ -173,9 +176,9 @@ struct CacheEntry {
         LOG_INFO(2007, index_id, "Cache entry construction completed");
     }
 
-    void markUpdated() {
-        updated = true;
-        updated_at = std::chrono::system_clock::now();
+    void markDirty() {
+        is_dirty = true;
+        last_dirtied_at = std::chrono::system_clock::now();
     }
     void resetSearchCount() { searchCount = 0; }
     // Delete copy constructor and assignment
@@ -295,8 +298,8 @@ private:
                                             << " failed VECTOR_ADD ids for reuse");
             }
 
-            // Mark as updated to trigger a save
-            entry.markUpdated();
+            // Mark as dirty to trigger a save
+            entry.markDirty();
             // Explicitly save the index after recovery
             LOG_DEBUG("Saving index after WAL recovery: " << index_id);
             // Save index will also clear the WAL and save bloom filter
@@ -322,7 +325,7 @@ private:
         LOG_INFO(2013, "Autosave thread stopped");
     }
 
-    // Check and save indices based on update time
+    // Check and save indices based on when they were last dirtied
     void checkAndSaveIndices() {
         std::vector<std::string> indices_to_save;
         auto now = std::chrono::system_clock::now();
@@ -333,10 +336,11 @@ private:
         {
             std::shared_lock<std::shared_mutex> read_lock(indices_mutex_);
             for(const auto& [index_id, entry] : indices_) {
-                if(entry && entry->updated) {
-                    auto time_since_update = now - entry->updated_at;
-                    // Save if more than SAVE_EVERY_N_MINUTES minutes since update
-                    if(time_since_update > std::chrono::minutes(settings::SAVE_EVERY_N_MINUTES)) {
+                if(entry && entry->is_dirty) {
+                    auto time_since_dirtied = now - entry->last_dirtied_at;
+                    // Save if more than SAVE_EVERY_N_MINUTES minutes since the last mutation
+                    if(time_since_dirtied
+                       > std::chrono::minutes(settings::SAVE_EVERY_N_MINUTES)) {
                         indices_to_save.push_back(index_id);
                     }
                 }
@@ -349,7 +353,7 @@ private:
             {
                 std::shared_lock<std::shared_mutex> read_lock(indices_mutex_);
                 auto it = indices_.find(index_id);
-                should_save = (it != indices_.end() && it->second && it->second->updated);
+                should_save = (it != indices_.end() && it->second && it->second->is_dirty);
             }
 
             if(should_save) {
@@ -434,8 +438,8 @@ private:
     // Internal saveIndex implementation that doesn't call getIndexEntry
     // Used by functions that already have the entry and mutex
     void saveIndexInternal(CacheEntry& entry) {
-        // Double check if the index is still updated
-        if(!entry.updated) {
+        // Double check if the index is still dirty
+        if(!entry.is_dirty) {
             return;
         }
         LOG_DEBUG("Saving index " << entry.index_id);
@@ -475,7 +479,7 @@ private:
             LOG_WARN(
                     2014, entry.index_id, "Failed to update element count in metadata");
         }
-        entry.updated = false;
+        entry.is_dirty = false;
     }
 
 public:
@@ -508,7 +512,7 @@ public:
             try {
                 auto entry = it->second;
                 std::unique_lock<std::shared_mutex> operation_lock(entry->operation_mutex);
-                if(entry->updated) {
+                if(entry->is_dirty) {
                     LOG_INFO(2050, to_evict, "Saving dirty index before eviction");
                     saveIndexInternal(*entry);
                 }
@@ -517,7 +521,7 @@ public:
                 return;
             }
 
-            if(it->second->updated) {
+            if(it->second->is_dirty) {
                 LOG_WARN(2054, to_evict, "Index remained dirty after forced save; aborting eviction");
                 return;
             }
@@ -596,14 +600,14 @@ public:
             {
                 std::shared_lock<std::shared_mutex> read_lock(indices_mutex_);
                 for(const auto& pair : indices_) {
-                    if(pair.second && pair.second->updated) {
+                    if(pair.second && pair.second->is_dirty) {
                         indices_to_save.push_back(pair.first);
                     }
                 }
             }
             for(const auto& index_id : indices_to_save) {
                 try {
-                    LOG_DEBUG("Saving updated index " << index_id << " during shutdown");
+                    LOG_DEBUG("Saving dirty index " << index_id << " during shutdown");
                     saveIndex(index_id);
                 } catch(const std::exception& e) {
                     LOG_ERROR(2017,
@@ -765,7 +769,7 @@ public:
                                                       std::move(wal),
                                                       std::chrono::system_clock::now());
             auto [it, inserted] = indices_.emplace(index_id, entry);
-            it->second->markUpdated();
+            it->second->markDirty();
             indices_list_.push_front(index_id);
         }
 
@@ -787,7 +791,7 @@ public:
         }
 
         LOG_INFO(2022, index_id, "Saving newly created index");
-        // Index is marked as updated so it needs to be saved immediately for crash recovery
+        // Index is marked dirty so it needs to be saved immediately for crash recovery
         saveIndex(index_id);
         return true;
     }
@@ -878,18 +882,18 @@ public:
         recoverFromWAL(*it->second);
     }
 
-    // Reload index: save (if updated), evict from memory, and reload
+    // Reload index: save (if dirty), evict from memory, and reload
     // Cache size is automatically checked and adjusted if < 5% of element count during reload
     bool reload(const std::string& index_id) {
         LOG_INFO(2023, index_id, "Starting reload");
 
         try {
-            // Phase 1: Save index if it was updated
+            // Phase 1: Save index if it is dirty
             {
                 std::shared_lock<std::shared_mutex> lock(indices_mutex_);
                 auto it = indices_.find(index_id);
-                if(it != indices_.end() && it->second && it->second->updated) {
-                    LOG_DEBUG("Saving updated index before reload: " << index_id);
+                if(it != indices_.end() && it->second && it->second->is_dirty) {
+                    LOG_DEBUG("Saving dirty index before reload: " << index_id);
                     saveIndex(index_id);
                 }
             }
@@ -1130,7 +1134,7 @@ public:
                 thread.join();
             }
 
-            entry.markUpdated();
+            entry.markDirty();
 
             // Check if we need to save based on WAL entry count after logging
             if(wal->getEntryCount() >= persistence_config_.save_every_n_updates) {
@@ -1246,8 +1250,8 @@ public:
         LOG_INFO(2033, index_id, "Recovered " << batch.size() << " vectors");
 
         // Step 6: Save index
-        // Mark the index as updated so that it will be saved
-        entry.markUpdated();
+        // Mark the index as dirty so that it will be saved
+        entry.markDirty();
         // FIX: Use internal save to avoid circular lock
         saveIndexInternal(entry);
 
@@ -1328,8 +1332,8 @@ public:
             // Add the list to write ahead log using IndexManager's method
             logDeletions(entry, numeric_ids);
 
-            // Mark the index as updated
-            entry.markUpdated();
+            // Mark the index as dirty
+            entry.markDirty();
 
             return true;
         } catch(const std::exception& e) {
@@ -1393,7 +1397,7 @@ public:
             }
 
             if(updated_count > 0) {
-                entry.markUpdated();
+                entry.markDirty();
             }
 
             return updated_count;
