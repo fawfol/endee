@@ -227,6 +227,12 @@ bool file_exists(const std::string& path) {
 
 int main(int argc, char** argv) {
 
+    const std::string settings_error = settings::validateStartupSettings();
+    if(!settings_error.empty()) {
+        LOG_ERROR(1065, "Server startup aborted: " << settings_error);
+        return 1;
+    }
+
     if(!is_cpu_compatible()) {
         LOG_ERROR(1004, "CPU is not compatible; server startup aborted");
         return 0;

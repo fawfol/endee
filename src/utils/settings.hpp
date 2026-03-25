@@ -56,7 +56,7 @@ namespace settings {
     constexpr size_t DEFAULT_METADATA_MAP_SIZE_BITS = 27;       // 128 MiB
     constexpr size_t DEFAULT_METADATA_MAP_SIZE_MAX_BITS = 39;   // 512 GiB
     constexpr size_t DEFAULT_VECTOR_MAP_SIZE_BITS = 30;         // 1 GiB
-    constexpr size_t DEFAULT_VECTOR_MAP_SIZE_MAX_BITS = 42;     // 4 TiB
+    constexpr size_t DEFAULT_VECTOR_MAP_SIZE_MAX_BITS = 40;     // 1 TiB
     // Sparse storage
     constexpr size_t DEFAULT_SPARSE_MAP_SIZE_MAX_BITS = 40;    // 1 TiB
 
@@ -85,12 +85,12 @@ namespace settings {
     //DEFAULT VALUES
     constexpr size_t DEFAULT_NUM_PARALLEL_INSERTS = 4;
     constexpr size_t DEFAULT_NUM_RECOVERY_THREADS = 16;
-    constexpr size_t DEFAULT_MAX_MEMORY_GB = 24;
 
     /**
      * Look at docs/memory_management.md
+     * XXX: DO NOT CHANGE THIS
      */
-    constexpr size_t MAX_LIVE_INDICES = 255;
+    constexpr size_t DEFAULT_MAX_LIVE_INDICES = 255;
     // constexpr float MAX_ANON_MEM = 60; //A percentage of total memory
 
     constexpr bool DEFAULT_ENABLE_DEBUG_LOG = true;
@@ -179,6 +179,11 @@ namespace settings {
         return env ? std::stoull(env) : DEFAULT_VECTOR_CACHE_MIN_BITS;
     }();
 
+    inline static size_t MAX_LIVE_INDICES = [] {
+        const char* env = std::getenv("NDD_MAX_LIVE_INDICES");
+        return env ? std::stoull(env) : DEFAULT_MAX_LIVE_INDICES;
+    }();
+
     // Number of parallel inserts. It will use this many threads to insert data in parallel
     inline static size_t NUM_PARALLEL_INSERTS = [] {
         const char* env = std::getenv("NDD_NUM_PARALLEL_INSERTS");
@@ -187,12 +192,6 @@ namespace settings {
     inline static size_t NUM_RECOVERY_THREADS = [] {
         const char* env = std::getenv("NDD_NUM_RECOVERY_THREADS");
         return env ? std::stoull(env) : DEFAULT_NUM_RECOVERY_THREADS;
-    }();
-    // TODO - Check if we can set this dynamically based on system memory
-    // Max memory for HNSW index. It will evict the oldest index if it exceeds this limit
-    inline static size_t MAX_MEMORY_GB = [] {
-        const char* env = std::getenv("NDD_MAX_MEMORY_GB");
-        return env ? std::stoull(env) : DEFAULT_MAX_MEMORY_GB;  // 24 GB by default
     }();
 
     inline static bool ENABLE_DEBUG_LOG = [] {
@@ -256,6 +255,39 @@ namespace settings {
         const char* env = std::getenv("NDD_SPARSE_MAP_SIZE_MAX_BITS");
         return env ? std::stoull(env) : DEFAULT_SPARSE_MAP_SIZE_MAX_BITS;
     }();
+
+    /**
+     * All the startup settings will be checked here.
+     * All violations will be returned as errors.
+     */
+    inline std::string validateStartupSettings() {
+        std::string error;
+
+        auto appendValidationError = [&error](const char* env_name,
+                                              size_t actual_value,
+                                              const char* default_name,
+                                              size_t default_value) {
+            if(!error.empty()) {
+                error += "; ";
+            }
+            error += env_name;
+            error += " (";
+            error += std::to_string(actual_value);
+            error += ") exceeds ";
+            error += default_name;
+            error += " (";
+            error += std::to_string(default_value);
+            error += ")";
+        };
+
+        if(MAX_LIVE_INDICES > DEFAULT_MAX_LIVE_INDICES) {
+            appendValidationError("NDD_MAX_LIVE_INDICES",
+                                  MAX_LIVE_INDICES,
+                                  "DEFAULT_MAX_LIVE_INDICES",
+                                  DEFAULT_MAX_LIVE_INDICES);
+        }
+        return error;
+    }
 
     // Function to get all settings values as a multiline string
     inline std::string getAllSettingsAsString() {
