@@ -840,7 +840,7 @@ int main(int argc, char** argv) {
                                       "k must be between " + std::to_string(settings::MIN_K)
                                               + " and " + std::to_string(settings::MAX_K));
                 }
-                size_t ef = body.has("ef") ? (size_t)body["ef"].i() : 0;
+                size_t ef = body.has("ef") ? (size_t)body["ef"].i() : settings::DEFAULT_EF_SEARCH;
                 bool include_vectors =
                         body.has("include_vectors") ? body["include_vectors"].b() : false;
                 nlohmann::json filter_array = nlohmann::json::array();  // default: empty filter
@@ -874,10 +874,9 @@ int main(int argc, char** argv) {
                      }
                 }
 
-                float dense_rrf_weight = body.has("dense_rrf_weight") ? (float)body["dense_rrf_weight"].d() : 0.5f;
+                float dense_rrf_weight = body.has("dense_rrf_weight") ? (float)body["dense_rrf_weight"].d() : settings::DEFAULT_DENSE_RRF_WEIGHT;
                 float sparse_rrf_weight = 1.0f - dense_rrf_weight;
-                float rrf_rank_constant = body.has("rrf_rank_constant") ? (float)body["rrf_rank_constant"].d() : 60.0f;
-                
+                float rrf_rank_constant = body.has("rrf_rank_constant") ? (float)body["rrf_rank_constant"].d() : settings::DEFAULT_RRF_RANK_CONSTANT;
                 LOG_DEBUG("Filter: " << filter_array.dump());
                 try {
                     auto search_response = index_manager.searchKNN(index_id,

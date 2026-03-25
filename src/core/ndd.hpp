@@ -1342,15 +1342,14 @@ public:
                 const nlohmann::json& filter_array,
                 ndd::FilterParams params = {},
                 bool include_vectors = false,
-                size_t ef = 0,
-                float kDenseRrfWeight = 0.5f,
-                float kSparseRrfWeight = 0.5f,
-                float kRrfRankConstant = 60.0f)
+                size_t ef = settings::DEFAULT_EF_SEARCH ,
+                float kDenseRrfWeight = settings::DEFAULT_DENSE_RRF_WEIGHT,
+                float kSparseRrfWeight = 1.0f - settings::DEFAULT_DENSE_RRF_WEIGHT,
+                float kRrfRankConstant = settings::DEFAULT_RRF_RANK_CONSTANT)
     {
         try {
             auto& entry = getIndexEntry(index_id);
             entry.searchCount += k;
-
             const bool run_dense_search = kDenseRrfWeight > 0.0f && !query.empty();
 
             const bool run_sparse_search =
