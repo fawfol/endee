@@ -243,7 +243,6 @@ int main(int argc, char** argv) {
     LOG_INFO("DATA_DIR: " << settings::DATA_DIR);
     LOG_INFO("NUM_PARALLEL_INSERTS: " << settings::NUM_PARALLEL_INSERTS);
     LOG_INFO("NUM_RECOVERY_THREADS: " << settings::NUM_RECOVERY_THREADS);
-    LOG_INFO("MAX_MEMORY_GB: " << settings::MAX_MEMORY_GB);
     LOG_INFO("ENABLE_DEBUG_LOG: " << settings::ENABLE_DEBUG_LOG);
     LOG_INFO("AUTH_TOKEN: " << settings::AUTH_TOKEN);
     LOG_INFO("AUTH_ENABLED: " << settings::AUTH_ENABLED);
