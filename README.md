@@ -1,139 +1,92 @@
-<p align="center">
-  <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
-      <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo-light.svg">
-      <img height="100" alt="Endee" src="docs/assets/logo-dark.svg">
-  </picture>
-</p>
+:: Local-First Smart Knowledge Assistant (RAG Pipeline)
 
-<p align="center">
-    <b>High-performance open-source vector database for AI search, RAG, semantic search, and hybrid retrieval.</b>
-</p>
+An offline, privacy-first Retrieval-Augmented Generation (RAG) system built directly on top of the **Endee C++ Vector Engine**. 
 
-<p align="center">
-    <a href="./docs/getting-started.md"><img src="https://img.shields.io/badge/Quick_Start-Local_Setup-success?style=flat-square" alt="Quick Start"></a>
-    <a href="https://docs.endee.io/quick-start"><img src="https://img.shields.io/badge/Docs-Quick_Start-success?style=flat-square" alt="Docs"></a>
-    <a href="https://github.com/endee-io/endee/blob/master/LICENSE"><img src="https://img.shields.io/github/license/endee-io/endee?style=flat-square" alt="License"></a>
-    <a href="https://discord.gg/5HFGqDZQE3"><img src="https://img.shields.io/badge/Discord-Join_Chat-5865F2?logo=discord&style=flat-square" alt="Discord"></a>
-    <a href="https://endee.io/"><img src="https://img.shields.io/badge/Website-Endee-111111?style=flat-square" alt="Website"></a>
-    <!-- <a href="https://endee.io/benchmarks"><img src="https://img.shields.io/badge/Benchmarks-Coming_Soon-1F8B4C?style=flat-square" alt="Benchmarks"></a> -->
-    <!-- <a href="https://endee.io/cloud"><img src="https://img.shields.io/badge/Cloud-Coming_Soon-2496ED?style=flat-square" alt="Cloud"></a> -->
-</p>
+This project was developed as a submission for the AI/ML Internship role. It demonstrates end-to-end pipeline engineering, from compiling C++ database engines to deploying highly optimized edge LLMs on resource-constrained hardware.
 
-<p align="center">
-<strong><a href="./docs/getting-started.md">Quick Start</a> • <a href="#why-endee">Why Endee</a> • <a href="#use-cases">Use Cases</a> • <a href="#features">Features</a> • <a href="#api-and-clients">API and Clients</a> • <a href="#docs-and-links">Docs</a> • <a href="#community-and-contact">Contact</a></strong>
-</p>
 
-# Endee: Open-Source Vector Database for AI Search
+:: Architecture & Tech Stack
 
-**Endee** is a high-performance open-source vector database built for AI search and retrieval workloads. It is designed for teams building **RAG pipelines**, **semantic search**, **hybrid search**, recommendation systems, and filtered vector retrieval APIs that need production-oriented performance and control.
+* **Vector Database:** [Endee](https://github.com/endee-io/endee) (Compiled from source with AVX2/SIMD acceleration).
+* **Embeddings:** `sentence-transformers` (`all-MiniLM-L6-v2`) generating 384-dimensional dense vectors locally.
+* **LLM Generation:** Qwen 2.5 (0.5B parameters) served via Ollama.
+* **Orchestration:** Python (Requests, Regex, JSON).
 
-Endee combines vector search with filtering, sparse retrieval support, backup workflows, and deployment flexibility across local builds and Docker-based environments. The project is implemented in C++ and optimized for modern CPU targets, including AVX2, AVX512, NEON, and SVE2.
+-------------------------
 
-If you want the fastest path to evaluate Endee locally, start with the [Getting Started guide](./docs/getting-started.md) or the hosted docs at [docs.endee.io](https://docs.endee.io/quick-start).
+::Engineering Challenges & Solutions
 
-## Why Endee
+To build this system on a highly constrained Linux environment (< 3GB available disk space and CPU-only processing no GPU) several architectural pivots and low-level optimizations were required:
 
-- Built as a dedicated vector database for AI applications, search systems, and retrieval-heavy workloads.
-- Supports dense vector retrieval plus sparse search capabilities for hybrid search use cases.
-- Includes payload filtering for metadata-aware retrieval and application-specific query logic.
-- Ships with operational features already documented in this repo, including backup flows and runtime observability.
-- Offers flexible deployment paths: local scripts, manual builds, Docker images, and prebuilt registry images.
+1. Hardware-Constrained LLM Deployment
+Standard local models (like Mistral 7B) requires more than 4gb of storage and high VRAM so to respect system limits while maintaining RAG capabilities i pivoted to **Qwen 2.5: 0.5B** and with thhis 500MB edge model provides fast inference on a CPU while remaining coherent enough to extract answers from highly specific retrieved context
 
-## Getting Started
+2. C++ API Reverse-Engineering & Integration
+Instead of relying on high level Python wrappers i integrated directly with Endee's C++ HTTP API and by analyzing the Endee source code (`src/main.cpp`) of few tenth of lines I mapped the exact JSON schemas required by the engine by first identiftyinh mandatory index parameters (`dim: 384`, `space_type: "cosine"`) and handling stringified metadata payloads (`"meta": json.dumps(...)`) to prevent C++ strict-type crashes then bypassed authorization middleware blocks by identifying open-mode configurations
 
-The full installation, build, Docker, runtime, and authentication instructions are in [docs/getting-started.md](./docs/getting-started.md).
+3. Binary sream passing regex
+for fast retrieval endee search endpoint returns a custom binary wrapped text stream rather than standard HTTP JSON for which the sandard py decoders (`requests.json()`) crashed immediately upon hitting the binary characters
+so what i did was create a custom regex extraction layer (`re.findall(r'\{"text":\s*".*?"\}', res.text)`) to safely extract the metadata JSON blocks from the raw binary stream bypassing the decode failures
 
-Fastest local path:
+---------------------------------
 
+:: To Run on local setup
+
+
+### you need ###
+* linux environment
+* [Ollama](https://ollama.com/) installed (took hella time on my device and also dtried mistral and which also wasted significant time coz my ram wasnt able to contain it anyways)
+* C++ build tools (CMake, libssl-dev)
+
+
+1. Start the Database Engine
+Navigate to the root `endee` directory then ensure its built and start the listener:
 ```bash
-chmod +x ./install.sh ./run.sh
-./install.sh --release --avx2
-./run.sh
-```
+bash run.sh
 
-The server listens on port `8080`. For detailed setup paths, supported operating systems, CPU optimization flags, Docker usage, and authentication examples, use:
+(runs on http://localhost:8080)
 
-- [Getting Started](./docs/getting-started.md)
-- [Hosted Quick Start Docs](https://docs.endee.io/quick-start)
+2. start the LLM Engine
+In a new terminal ensure the Ollama service is running and pull the lightweight model:
+Bash
 
-## Use Cases
+ollama run qwen2:0.5b   (or if you are going to run mistral or any other on hardware constrain you can do pull isolated and then do run)
 
-### RAG and AI Retrieval
+(Runs on http://localhost:11434)
+3.launch the RAG Application
 
-Use Endee as the retrieval layer for question answering, chat assistants, copilots, and other RAG applications that need fast vector search with metadata-aware filtering.
+in a third terminal you haveto activate your python environment and start the conversational loop:
+Bash
 
-### Agentic AI and AI Agent Memory
+cd rag_app
+source venv/bin/activate
+pip install -r requirements.txt  # (sentence-transformers, requests)
+python test_pipeline.py
 
-Use Endee as the long-term memory and context retrieval layer for AI agents built with frameworks like LangChain, CrewAI, AutoGen, and LlamaIndex. Store and retrieve past observations, tool outputs, conversation history, and domain knowledge mid-execution with low-latency filtered vector search, so your autonomous agents get the right context without stalling their reasoning loop.
+Example Usage :
+Plaintext
 
-### Semantic Search
+ STARTING RAG PIPELINE TEST
 
-Build semantic search experiences for documents, products, support content, and knowledge bases using vector similarity search instead of exact keyword-only matching.
+Creating index 'my_docs_v2' in Endee...
+ Index ready.
 
-### Hybrid Search
+--- Ingesting Documents ---
+Inserted chunk 1 into Endee
+Inserted chunk 2 into Endee
+Inserted chunk 3 into Endee
 
-Combine dense retrieval, sparse vectors, and filtering to improve relevance for search workflows where both semantic understanding and term-level precision matter.
+==================================================
+TERMINAL RAG BOT INITIALIZED
+Type 'exit' or 'quit' to stop.
+==================================================
 
-### Recommendations and Matching
+You: What is the internship stipend?
+Searching Endee for context
+Found Context
+asking local LLM
 
-Support recommendation, similarity matching, and nearest-neighbor retrieval workflows across text, embeddings, and other high-dimensional representations.
+AI: The internship requires building a RAG system and pays a stipend of ₹20,000 for the first 3 months
 
-## Features
+might make good UI if i got time
 
-- **Vector search** for AI retrieval and semantic similarity workloads.
-- **Hybrid retrieval support** with sparse vector capabilities documented in [docs/sparse.md](./docs/sparse.md).
-- **Payload filtering** for structured retrieval logic documented in [docs/filter.md](./docs/filter.md).
-- **Backup APIs and flows** documented in [docs/backup-system.md](./docs/backup-system.md).
-- **Operational logging and instrumentation** documented in [docs/logs.md](./docs/logs.md) and [docs/mdbx-instrumentation.md](./docs/mdbx-instrumentation.md).
-- **CPU-targeted builds** for AVX2, AVX512, NEON, and SVE2 deployments.
-- **Docker deployment options** for local and server environments.
-
-## API and Clients
-
-Endee exposes an HTTP API for managing indexes and serving retrieval workloads. The current repo documentation and examples focus on running the server directly and calling its API endpoints.
-
-Current developer entry points:
-
-- [Getting Started](./docs/getting-started.md) for local build and run flows
-- [Hosted Docs](https://docs.endee.io/quick-start) for product documentation
-- [Release Notes 1.0.0](https://github.com/endee-io/endee/releases/tag/1.0.0) for recent platform changes
-
-## Docs and Links
-
-- [Getting Started](./docs/getting-started.md)
-- [Hosted Documentation](https://docs.endee.io/quick-start)
-- [Release Notes](https://github.com/endee-io/endee/releases/tag/1.0.0)
-- [Sparse Search](./docs/sparse.md)
-- [Filtering](./docs/filter.md)
-- [Backups](./docs/backup-system.md)
-
-## Community and Contact
-
-- Join the community on [Discord](https://discord.gg/5HFGqDZQE3)
-- Visit the website at [endee.io](https://endee.io/)
-- For trademark or branding permissions, contact [enterprise@endee.io](mailto:enterprise@endee.io)
-
-## Contributing
-
-We welcome contributions from the community to help make vector search faster and more accessible for everyone.
-
-- Submit pull requests for fixes, features, and improvements
-- Report bugs or performance issues through GitHub issues
-- Propose enhancements for search quality, performance, and deployment workflows
-
-## License
-
-Endee is open source software licensed under the **Apache License 2.0**. See the [LICENSE](./LICENSE) file for full terms.
-
-## Trademark and Branding
-
-“Endee” and the Endee logo are trademarks of Endee Labs.
-
-The Apache License 2.0 does not grant permission to use the Endee name, logos, or branding in a way that suggests endorsement or affiliation.
-
-If you offer a hosted or managed service based on this software, you must use your own branding and avoid implying it is an official Endee service.
-
-## Third-Party Software
-
-This project includes or depends on third-party software components licensed under their respective open-source licenses. Use of those components is governed by their own license terms.

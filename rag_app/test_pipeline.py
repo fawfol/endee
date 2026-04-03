@@ -109,28 +109,35 @@ if __name__ == "__main__":
 
     setup_endee()
 
-    doc_1 = "Endee is a high-performance vector database written in C++. It is designed for semantic search."
+    doc_1 = "Endee is a high-performance open-source vector database built for AI search and retrieval workloads. It is designed for teams building RAG pipelines, semantic search, hybrid search, recommendation systems, and filtered vector retrieval APIs that need production-oriented performance and control."
     doc_2 = "Ollama is a lightweight tool for running Large Language Models locally without needing API keys."
     doc_3 = "The internship requires building a RAG system and pays a stipend of ₹20,000 for the first 3 months."
-   
 
     print("\n---ingesting docs---")
     ingest_text(1, doc_1)
     ingest_text(2, doc_2)
     ingest_text(3, doc_3)
 
-    user_question = "What is the internship stipend?"
-    print(f"\n Question: {user_question}")
+    #chat loop
+    print("\n" + "="*50)
+    print("TERMINAL RAG BOT INITIALIZED")
+    print("Type 'exit' or 'quit' to stop.")
+    print("="*50 + "\n")
 
-    print(" Searching Endee for context...")
-    context = retrieve_context(user_question)
+    while True:
+        user_question = input("\n @You: ")
+        
+        if user_question.lower() in ['exit', 'quit']:
+            print("Shutting down... Goodbye!")
+            break
+        print("Searching Endee for context...")
+        context = retrieve_context(user_question)
 
-    if context:
-        print(f" Found Context!")
-
-        final_answer = generate_answer(user_question, context)
-        print(f"\n FINAL AI ANSWER:\n{final_answer}\n")
-    else:
-        print(" No context found in the database.")
+        if context:
+            print(f"Found Context!")
+            final_answer = generate_answer(user_question, context)
+            print(f"\nAI: {final_answer}\n")
+        else:
+            print("\nAI: I couldn't find any relevant context in the database.\n")
 
 ##you know aanyone can wrap an OpenAI API key in five lines of code BUT building a custom C++ database pipeline on a constrained Linux machine then handling binary data streams and optimizing for a 0.5B parameter edge model?? meh i think thats Senior Engineer material
