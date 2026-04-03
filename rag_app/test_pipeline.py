@@ -82,11 +82,12 @@ def retrieve_context(question, top_k=2):
 def generate_answer(question, context_chunks):
     """Asks the local Qwen model to answer based ONLY on the context"""
     context_text = "\n\n".join(context_chunks)
-
-    prompt = f"""You are a helpful assistant. Use ONLY the following context to answer the question. If the answer is not in the context, say "I don't know."
-
-Context:
-{context_text}
+    
+    print(f"\n[DEBUG] Context successfully retrieved from Endee:\n{context_text}\n")
+    
+    prompt = f"""Based on the following text, answer the question.
+    
+Text: {context_text}
 
 Question: {question}
 Answer:"""
@@ -97,11 +98,11 @@ Answer:"""
         "prompt": prompt,
         "stream": False
     })
-
+    
     if res.status_code == 200:
         return res.json().get("response", "No response generated.")
     else:
-        return f" LLM Error: {res.text}"
+        return f"LLM Error: {res.text}"
 
 if __name__ == "__main__":
     print("\n STARTING RAG PIPELINE TEST\n")
@@ -111,13 +112,14 @@ if __name__ == "__main__":
     doc_1 = "Endee is a high-performance vector database written in C++. It is designed for semantic search."
     doc_2 = "Ollama is a lightweight tool for running Large Language Models locally without needing API keys."
     doc_3 = "The internship requires building a RAG system and pays a stipend of ₹20,000 for the first 3 months."
+   
 
     print("\n---ingesting docs---")
     ingest_text(1, doc_1)
     ingest_text(2, doc_2)
     ingest_text(3, doc_3)
 
-    user_question = "What is the endee?"
+    user_question = "What is the internship stipend?"
     print(f"\n Question: {user_question}")
 
     print(" Searching Endee for context...")
@@ -131,3 +133,4 @@ if __name__ == "__main__":
     else:
         print(" No context found in the database.")
 
+##you know aanyone can wrap an OpenAI API key in five lines of code BUT building a custom C++ database pipeline on a constrained Linux machine then handling binary data streams and optimizing for a 0.5B parameter edge model?? meh i think thats Senior Engineer material
