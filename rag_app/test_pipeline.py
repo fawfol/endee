@@ -5,8 +5,7 @@ from sentence_transformers import SentenceTransformer
 
 ENDEE_BASE_URL = "http://localhost:8080/api/v1"
 OLLAMA_URL = "http://localhost:11434/api/generate"
-INDEX_NAME = "my_docs_v2"  
-
+INDEX_NAME = "ui_database_v1"
 HEADERS = {"Content-Type": "application/json"}
 
 print("Loading embedding model (this might take a few seconds)...")

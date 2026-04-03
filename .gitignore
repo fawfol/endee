@@ -30,3 +30,5 @@ frontend/*
 
 # DS Store
 .DS_Store
+rag_app/venv/
+rag_app/__pycache__/

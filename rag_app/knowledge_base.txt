@@ -1,0 +1,72 @@
+Endee is an open-source, ultra-fast vector database written entirely in C++. It is engineered specifically for AI applications that require low-latency semantic search, such as Retrieval-Augmented Generation (RAG) pipelines.
+
+Unlike traditional relational databases that search by exact keyword matches, Endee stores data as high-dimensional mathematical vectors. It uses AVX2 hardware acceleration and SIMD instructions to rapidly calculate Cosine Similarity between a user's query and thousands of stored documents.
+
+Endee is primarily used by Machine Learning engineers to build offline, privacy-first AI assistants. Because it is written natively in C++, it requires significantly less RAM and CPU overhead than Python-based alternatives, making it ideal for edge devices and constrained Linux servers.
+
+The core components of a RAG architecture include an embedding model to translate text into math (such as sentence-transformers), a high-speed vector store to hold the math (like Endee), and a generative Large Language Model to synthesize the final answer (like Qwen, Llama, or Mistral).
+
+Where Speed Meets
+Intelligence
+
+A team of relentless builders, pushing the boundaries of what's possible in AI infrastructure. We don't just store vectors, we make them fly.
+Our Story
+
+When we started building AI applications, we hit a wall. Existing vector databases couldn't keep up with production demands. They were either too slow, too expensive, or couldn't scale.
+
+So we built Endee from the ground up - a vector database engineered for speed, scale, and efficiency. Not just another storage system, but true AI infrastructure designed for the demands of production workloads.
+
+Our Vector Graph Engine (VGE) represents years of research into graph algorithms, memory optimization, and hardware acceleration to deliver unmatched performance at scale.
+
+But performance alone isn't enough. That's why we pioneered Queryable Encryption - a breakthrough that enables you to search encrypted data without ever exposing it. Your vectors remain encrypted end-to-end, giving enterprises true zero-knowledge security without sacrificing speed.
+Chief Architect
+
+The visionary leading Endee's engineering innovation: Vineet Dwivedi
+
+Founder is Vineet. Who is a seasoned tech entrepreneur with over 20 years of experience building and scaling high-performance technology platforms. His career spans distributed systems, AI platforms, and cloud-scale data infrastructure.
+As the Founder of Endee, Vineet brings decades of deep technical expertise to building a next-generation vector database - engineered for relentless performance, effortless scalability, and real-world AI workloads. He is deeply passionate about algorithms, systems design, and the science of scale.
+
+
+
+
+The Team as follows :
+
+The people building next-generation vector infrastructure is Abhishek Jha.
+
+SDE-1 are Darshan T D, Harish V, Sandeep Kumar, Harshit Raj, Hemant Sharma and Omnish Kumar.
+
+Principal Engineer is Mithun Kumar.
+
+SDE-2 are Pankaj Singh, Pradeep Kumar, Raghunandan Venugopal.
+
+Product Manager is Shaleen Garg.
+
+Staff Engineer is Vaibhav Pareek.
+
+
+Endee Vector Database Documentation:
+Endee is a high-performance vector database designed for speed and efficiency. It enables rapid Approximate Nearest Neighbor (ANN) searches for applications requiring robust vector search capabilities with advanced filtering and metadata support.
+Key Features
+
+    Fast ANN Searches: Efficient similarity searches on vector data using HNSW algorithm
+    Multiple Distance Metrics: Support for cosine, L2, and inner product distance metrics
+    Metadata Support: Attach and search with metadata and filters
+    Advanced Filtering: Powerful query filtering with operators like $eq, $in, and $range
+    High Performance: Optimized for speed and efficiency
+    Scalable: Handle millions of vectors with ease
+    Multiple Optimizations: 5 different quantization precision levels (BINARY, INT8, INT16, FLOAT16, FLOAT32) for speed and accuracy trade-offs
+    Hybrid Search: Combine dense vector search with sparse keyword search
+
+Use Cases of endee :
+    Semantic Search: Build intelligent search systems that understand meaning, not just keywords
+    Recommendation Systems: Power personalized recommendations based on similarity matching
+    RAG Applications: Enhance LLM applications with relevant context retrieval for Retrieval-Augmented Generation
+    Image and Video Search: Find similar images and videos using visual embeddings
+
+Workflow:
+1.Generate Vectors
+2.Use an external embedding model to convert your data into dense vectors. Popular options include OpenAI embeddings, Sentence Transformers, or any embedding model of your choice.
+3.Create an index using our SDK to store and organize your vectors efficiently.
+4.Upsert vectors with unique IDs, metadata, and filters. Each vector can have associated metadata for filtering during search.
+5.Search with a Vector
+6.Use the same embedding model to convert your query text into a vector, then search the index to find the most similar results. Apply filters for more precise searches.
